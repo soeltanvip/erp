@@ -57,7 +57,25 @@
   <div class="flex flex-1 overflow-hidden">
     <!-- SIDEBAR -->
     <aside :class="mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'" class="fixed inset-y-0 left-0 pt-16 lg:pt-0 z-10 w-64 bg-white border-r border-gray-200 transition-transform duration-200 ease-in-out lg:static lg:translate-x-0 flex flex-col justify-between">
-      <div class="py-4 px-3 space-y-1">
+      <div class="py-3 px-3 space-y-3">
+        
+        <!-- PEMILIH NOMOR AKTIF (PRD v1.10) -->
+        <div class="p-3 bg-blue-50/60 border border-blue-200 rounded-lg space-y-1.5">
+          <label class="block text-[10px] font-bold uppercase tracking-wider text-blue-900">
+            Nomor Aktif
+          </label>
+          <select x-model="activeSenderId" @change="onActiveSenderChange()" class="w-full text-xs font-semibold p-2 bg-white border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-gray-800">
+            <template x-for="p in pengirimList" :key="p.id">
+              <option :value="p.id" x-text="p.label + ' (' + p.no_hp + ')'"></option>
+            </template>
+          </select>
+          <div class="flex items-center justify-between text-[11px] text-gray-500 pt-0.5">
+            <span>Status:</span>
+            <span :class="'badge-' + (getActiveSender() ? getActiveSender().status : 'nonaktif')" class="px-1.5 py-0.2 rounded text-[10px] font-bold capitalize" x-text="getActiveSender() ? getActiveSender().status : '-'"></span>
+          </div>
+        </div>
+
+        <div class="space-y-1">
         <template x-for="item in navItems" :key="item.id">
           <div>
             <button x-show="!item.disabled" @click="currentTab = item.id; mobileMenuOpen = false; loadTabContent(item.id);"
@@ -76,8 +94,11 @@
           </div>
         </template>
       </div>
-      <div class="p-4 border-t border-gray-100 text-xs text-gray-400">
-        SheetBlast WA v1.0.0
+        </div>
+      </div>
+      <div class="p-4 border-t border-gray-100 text-xs text-gray-400 flex items-center justify-between">
+        <span>SheetBlast WA v1.10</span>
+        <button @click="triggerMigrasiPemilik()" class="text-[10px] text-blue-600 hover:underline" title="Migrasi kontak lama ke nomor aktif pertama">Migrasi Pemilik</button>
       </div>
     </aside>
 
@@ -214,6 +235,27 @@
           </div>
         </div>
 
+        <!-- BAR AKSI MASSAL KONTAK (PRD v1.10) -->
+        <div x-show="selectedKontakIds.length > 0" class="p-3 bg-blue-50 border border-blue-200 rounded-lg flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div class="font-semibold text-blue-950 flex items-center space-x-1.5">
+            <i data-lucide="check-square" class="w-4 h-4 text-blue-600"></i>
+            <span><strong x-text="selectedKontakIds.length"></strong> kontak dipilih</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button @click="openModalBulkPemilik('tambah')" class="btn-primary text-xs px-3 py-1.5 rounded-lg font-medium inline-flex items-center space-x-1 shadow-sm">
+              <i data-lucide="user-plus" class="w-3.5 h-3.5"></i>
+              <span>Tambah Pemilik</span>
+            </button>
+            <button @click="openModalBulkPemilik('lepas')" class="bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 text-xs px-3 py-1.5 rounded-lg font-medium inline-flex items-center space-x-1 shadow-sm">
+              <i data-lucide="user-minus" class="w-3.5 h-3.5"></i>
+              <span>Lepas Pemilik</span>
+            </button>
+            <button @click="selectedKontakIds = []" class="text-gray-500 hover:text-gray-800 underline px-1.5">
+              Batal
+            </button>
+          </div>
+        </div>
+
         <!-- Filter & Search Toolbar -->
         <div class="bg-white p-4 rounded-lg border border-gray-200 shadow-sm space-y-3">
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -250,20 +292,23 @@
             <table class="w-full text-left text-sm text-gray-600">
               <thead class="bg-gray-50 text-gray-700 text-xs uppercase border-b">
                 <tr>
-                  <th class="py-3 px-4">Nama</th>
-                  <th class="py-3 px-4">No. HP</th>
-                  <th class="py-3 px-4">Kota & Sumber</th>
-                  <th class="py-3 px-4">Tahap</th>
-                  <th class="py-3 px-4">Tag</th>
-                  <th class="py-3 px-4">Terakhir Dikirim</th>
-                  <th class="py-3 px-4 text-center">Aksi</th>
+                  <th class="py-3 px-3 w-8">
+                    <input type="checkbox" @change="toggleSelectAllKontak($event)" :checked="isAllKontakSelected()" class="rounded text-blue-600">
+                  </th>
+                  <th class="py-3 px-3">Nama</th>
+                  <th class="py-3 px-3">No. HP</th>
+                  <th class="py-3 px-3">Kota & Sumber</th>
+                  <th class="py-3 px-3">Tahap</th>
+                  <th class="py-3 px-3">Tag</th>
+                  <th class="py-3 px-3">Terakhir Dikirim</th>
+                  <th class="py-3 px-3 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-100">
                 <!-- SKELETON LOADING -->
                 <template x-if="loadingKontak">
                   <tr>
-                    <td colspan="7" class="py-8 text-center text-gray-400">
+                    <td colspan="8" class="py-8 text-center text-gray-400">
                       <div class="inline-flex items-center space-x-2">
                         <i data-lucide="loader" class="w-5 h-5 animate-spin text-blue-600"></i>
                         <span>Memuat data kontak...</span>
@@ -275,11 +320,14 @@
                 <template x-if="!loadingKontak">
                   <template x-for="k in kontakList" :key="k.id">
                     <tr class="hover:bg-gray-50">
-                      <td class="py-3 px-4">
-                        <div class="font-semibold text-gray-900" x-text="k.nama"></div>
-                        <div class="text-xs text-gray-400" x-text="k.email || '-'"></div>
+                      <td class="py-3 px-3">
+                        <input type="checkbox" :value="k.id" x-model="selectedKontakIds" class="rounded text-blue-600">
                       </td>
-                      <td class="py-3 px-4 font-mono text-xs text-gray-800" x-text="k.no_hp"></td>
+                      <td class="py-3 px-3">
+                        <div class="font-semibold text-gray-900" x-text="k.nama"></div>
+                        <div class="text-[11px] text-gray-400" x-text="k.email || '-'"></div>
+                      </td>
+                      <td class="py-3 px-3 font-mono text-xs text-gray-800" x-text="k.no_hp"></td>
                       <td class="py-3 px-4 text-xs">
                         <span x-text="k.kota || '-'"></span> / <span class="text-gray-500" x-text="k.sumber || '-'"></span>
                       </td>
@@ -322,11 +370,11 @@
                 </template>
 
                 <tr x-show="!loadingKontak && kontakList.length === 0">
-                  <td colspan="7" class="py-12 text-center">
+                  <td colspan="8" class="py-12 text-center">
                     <div class="max-w-xs mx-auto text-gray-400 space-y-3">
                       <i data-lucide="users" class="w-10 h-10 mx-auto text-gray-300"></i>
-                      <p class="text-sm font-medium">Belum ada kontak yang cocok.</p>
-                      <button @click="openModalKontak()" class="btn-primary text-xs px-3 py-1.5 rounded-lg">Tambah Kontak Pertama</button>
+                      <p class="text-sm font-medium">Belum ada kontak milik nomor aktif ini.</p>
+                      <button @click="openModalKontak()" class="btn-primary text-xs px-3 py-1.5 rounded-lg">Tambah Kontak Baru</button>
                     </div>
                   </td>
                 </tr>
@@ -937,6 +985,17 @@
           </div>
         </div>
         <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Pemilik Kontak (Bisa lebih dari 1 nomor) *</label>
+          <div class="flex flex-wrap gap-2 p-2 border rounded-lg max-h-24 overflow-y-auto bg-gray-50/50">
+            <template x-for="p in pengirimList" :key="p.id">
+              <label class="inline-flex items-center space-x-1.5 text-xs bg-white px-2 py-1 rounded cursor-pointer border hover:bg-gray-50">
+                <input type="checkbox" :value="p.id" x-model="formKontak.pemilik_ids" class="rounded text-blue-600">
+                <span x-text="p.label + ' (' + p.no_hp + ')'"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+        <div>
           <label class="block text-xs font-semibold text-gray-600 mb-1">Catatan</label>
           <textarea x-model="formKontak.catatan" rows="2" class="w-full p-2 border rounded-lg" placeholder="Catatan tambahan..."></textarea>
         </div>
@@ -996,15 +1055,14 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           <h2 class="text-xl font-bold text-gray-900">Buat Broadcast Kampanye</h2>
           <button @click="closeModal('modalWizard')" class="text-gray-400 hover:text-gray-600"><i data-lucide="x" class="w-6 h-6"></i></button>
         </div>
-        <!-- 6 Steps Indicator -->
-        <div class="grid grid-cols-6 gap-2 text-center text-xs">
+        <!-- 5 Steps Indicator (PRD v1.10) -->
+        <div class="grid grid-cols-5 gap-2 text-center text-xs">
           <template x-for="s in [
-            {n:1, l:'Penerima'},
-            {n:2, l:'Pengirim'},
-            {n:3, l:'Template'},
-            {n:4, l:'Jeda'},
-            {n:5, l:'Aksi Tag'},
-            {n:6, l:'Review'}
+            {n:1, l:'Target'},
+            {n:2, l:'Template'},
+            {n:3, l:'Jadwal'},
+            {n:4, l:'Aksi Tag'},
+            {n:5, l:'Penerima'}
           ]" :key="s.n">
             <div :class="wizardStep === s.n ? 'border-b-2 border-blue-600 pb-1 font-bold text-blue-600' : (wizardStep > s.n ? 'text-emerald-600 font-semibold' : 'text-gray-400')">
               <span x-text="s.n + '. ' + s.l"></span>
@@ -1013,62 +1071,100 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
         </div>
       </div>
 
-      <!-- STEP 1: AUDIENS / PENERIMA -->
+      <!-- STEP 1: TARGET DENGAN FILTER SATUAN -->
       <div x-show="wizardStep === 1" class="space-y-4">
-        <h3 class="font-semibold text-gray-800 text-sm">Pilih Sumber Penerima</h3>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label class="p-3 border rounded-lg cursor-pointer flex items-center space-x-3" :class="wizardData.targetMode === 'semua' ? 'border-blue-600 bg-blue-50' : ''">
-            <input type="radio" value="semua" x-model="wizardData.targetMode" class="text-blue-600">
-            <div>
-              <div class="font-semibold text-sm">Semua Kontak Valid</div>
-              <div class="text-xs text-gray-500">Kirim ke semua database non-opt-out</div>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 class="font-semibold text-gray-800 text-sm">Filter Kriteria Penerima</h3>
+            <p class="text-xs text-gray-500">Hanya kontak milik nomor aktif (<span class="font-bold text-blue-600" x-text="getActiveSender() ? getActiveSender().label : '-'"></span>) yang dihitung.</p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button type="button" @click="promptSaveFilterAsSegmen()" class="text-xs bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-2.5 py-1.5 rounded-lg inline-flex items-center space-x-1 shadow-sm font-medium">
+              <i data-lucide="bookmark-plus" class="w-3.5 h-3.5 text-blue-600"></i>
+              <span>Simpan sebagai Segmen</span>
+            </button>
+            <div class="relative">
+              <select @change="applySavedSegmenToFilter($event.target.value); $event.target.value = '';" class="text-xs bg-blue-50 border border-blue-200 text-blue-700 px-2.5 py-1.5 rounded-lg font-medium">
+                <option value="">Pakai Segmen...</option>
+                <template x-for="s in segmenList" :key="s.id">
+                  <option :value="s.id" x-text="s.nama"></option>
+                </template>
+              </select>
             </div>
+          </div>
+        </div>
+
+        <!-- Pilihan Operator AND / OR -->
+        <div class="flex items-center space-x-4 p-2.5 bg-gray-50 rounded-lg border text-xs">
+          <span class="font-bold text-gray-700">Kombinasi Kondisi:</span>
+          <label class="inline-flex items-center space-x-1.5 cursor-pointer">
+            <input type="radio" value="AND" x-model="wizardFilter.operator" @change="loadTargetPreview()" class="text-blue-600">
+            <span>Memenuhi <strong>SEMUA</strong> kondisi (AND)</span>
           </label>
-          <label class="p-3 border rounded-lg cursor-pointer flex items-center space-x-3" :class="wizardData.targetMode === 'segmen' ? 'border-blue-600 bg-blue-50' : ''">
-            <input type="radio" value="segmen" x-model="wizardData.targetMode" class="text-blue-600">
-            <div>
-              <div class="font-semibold text-sm">Gunakan Segmen</div>
-              <div class="text-xs text-gray-500">Pilih dari segmen filter tersimpan</div>
-            </div>
+          <label class="inline-flex items-center space-x-1.5 cursor-pointer">
+            <input type="radio" value="OR" x-model="wizardFilter.operator" @change="loadTargetPreview()" class="text-blue-600">
+            <span>Cukup memenuhi <strong>SALAH SATU</strong> kondisi (OR)</span>
           </label>
         </div>
 
-        <div x-show="wizardData.targetMode === 'segmen'">
-          <label class="block text-xs font-semibold text-gray-600 mb-1">Pilih Segmen</label>
-          <select x-model="wizardData.segmenId" class="w-full p-2 border rounded-lg text-sm">
-            <option value="">-- Pilih Segmen --</option>
-            <template x-for="s in segmenList" :key="s.id">
-              <option :value="s.id" x-text="s.nama"></option>
-            </template>
-          </select>
+        <!-- Filter Satuan Fields -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Tag</label>
+            <select x-model="wizardFilter.tag" @change="loadTargetPreview()" class="w-full p-2 border rounded-lg text-xs bg-white">
+              <option value="">Semua Tag</option>
+              <template x-for="t in tagList" :key="t.id">
+                <option :value="t.id" x-text="t.nama"></option>
+              </template>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Tahap</label>
+            <select x-model="wizardFilter.tahap" @change="loadTargetPreview()" class="w-full p-2 border rounded-lg text-xs bg-white">
+              <option value="">Semua Tahap</option>
+              <option value="baru">Baru</option>
+              <option value="dihubungi">Dihubungi</option>
+              <option value="tertarik">Tertarik</option>
+              <option value="closing">Closing</option>
+              <option value="pelanggan">Pelanggan</option>
+              <option value="tidak_tertarik">Tidak Tertarik</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Kota Berisi</label>
+            <input type="text" x-model="wizardFilter.kota" @input.debounce.300ms="loadTargetPreview()" placeholder="Contoh: Jakarta" class="w-full p-2 border rounded-lg text-xs">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Sumber Berisi</label>
+            <input type="text" x-model="wizardFilter.sumber" @input.debounce.300ms="loadTargetPreview()" placeholder="Contoh: Instagram" class="w-full p-2 border rounded-lg text-xs">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Status Berlangganan</label>
+            <select x-model="wizardFilter.optOut" @change="loadTargetPreview()" class="w-full p-2 border rounded-lg text-xs bg-white">
+              <option value="false">Aktif (Opt-in)</option>
+              <option value="true">Berhenti (Opt-out)</option>
+              <option value="">Semua</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Pencarian Kontak</label>
+            <input type="text" x-model="wizardFilter.search" @input.debounce.300ms="loadTargetPreview()" placeholder="Nama, nomor HP, email..." class="w-full p-2 border rounded-lg text-xs">
+          </div>
+        </div>
+
+        <!-- Live Count Indicator -->
+        <div class="p-3 rounded-lg border flex items-center justify-between text-xs" :class="targetPreviewCount > 0 ? 'bg-blue-50 border-blue-200 text-blue-900' : 'bg-gray-50 border-gray-200 text-gray-500'">
+          <div class="flex items-center space-x-2">
+            <i data-lucide="loader" class="w-4 h-4 animate-spin text-blue-600" x-show="loadingTargetPreview"></i>
+            <i data-lucide="users" class="w-4 h-4 text-blue-600" x-show="!loadingTargetPreview"></i>
+            <span>Ditemukan <strong class="text-sm font-bold" x-text="targetPreviewCount"></strong> penerima yang cocok dengan kriteria ini.</span>
+          </div>
+          <button type="button" @click="resetWizardFilter()" class="text-xs text-gray-500 hover:text-red-600 underline">Reset Filter</button>
         </div>
       </div>
 
-      <!-- STEP 2: PENGIRIM (F-15: Tepat Satu Pengirim) -->
+      <!-- STEP 2: TEMPLATE & PRATINJAU -->
       <div x-show="wizardStep === 2" class="space-y-4">
-        <h3 class="font-semibold text-gray-800 text-sm">Pilih Nomor Pengirim WhatsApp (1 Perangkat Aktif)</h3>
-        <div class="space-y-2">
-          <template x-for="p in pengirimList" :key="p.id">
-            <label class="p-3 border rounded-lg flex items-center justify-between cursor-pointer"
-              :class="{
-                'opacity-50 cursor-not-allowed bg-gray-50': p.status !== 'aktif' || p.terpakai_hari_ini >= p.kuota_harian,
-                'border-blue-600 bg-blue-50': wizardData.idPengirim === p.id && p.status === 'aktif' && p.terpakai_hari_ini < p.kuota_harian
-              }">
-              <div class="flex items-center space-x-3">
-                <input type="radio" :value="p.id" x-model="wizardData.idPengirim" :disabled="p.status !== 'aktif' || p.terpakai_hari_ini >= p.kuota_harian" class="text-blue-600">
-                <div>
-                  <div class="font-semibold text-sm text-gray-900" x-text="p.label + ' (' + p.no_hp + ')'"></div>
-                  <div class="text-xs text-gray-500">Kuota hari ini: <span x-text="p.terpakai_hari_ini"></span> / <span x-text="p.kuota_harian"></span></div>
-                </div>
-              </div>
-              <span :class="'badge-' + p.status" class="px-2 py-0.5 rounded text-xs font-semibold capitalize" x-text="p.status"></span>
-            </label>
-          </template>
-        </div>
-      </div>
-
-      <!-- STEP 3: TEMPLATE & PRATINJAU -->
-      <div x-show="wizardStep === 3" class="space-y-4">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="space-y-3">
             <h3 class="font-semibold text-gray-800 text-sm">Pilih Template Pesan</h3>
@@ -1093,20 +1189,20 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
         </div>
       </div>
 
-      <!-- STEP 4: JEDA & JADWAL (F-21) -->
-      <div x-show="wizardStep === 4" class="space-y-4">
+      <!-- STEP 3: JEDA & JADWAL (F-21) -->
+      <div x-show="wizardStep === 3" class="space-y-4">
         <div>
           <h3 class="font-semibold text-gray-800 text-sm mb-2">Mulai Kirim</h3>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md mb-3">
             <label class="p-3 border rounded-lg cursor-pointer flex items-center space-x-3" :class="wizardData.modeJadwal === 'sekarang' ? 'border-blue-600 bg-blue-50' : ''">
-              <input type="radio" value="sekarang" x-model="wizardData.modeJadwal" class="text-blue-600">
+              <input type="radio" value="sekarang" x-model="wizardData.modeJadwal" @change="recalculateRecipientSchedules()" class="text-blue-600">
               <div>
                 <div class="font-semibold text-sm">Sekarang</div>
                 <div class="text-xs text-gray-500">Kirim segera saat dijalankan</div>
               </div>
             </label>
             <label class="p-3 border rounded-lg cursor-pointer flex items-center space-x-3" :class="wizardData.modeJadwal === 'jadwal' ? 'border-blue-600 bg-blue-50' : ''">
-              <input type="radio" value="jadwal" x-model="wizardData.modeJadwal" class="text-blue-600">
+              <input type="radio" value="jadwal" x-model="wizardData.modeJadwal" @change="recalculateRecipientSchedules()" class="text-blue-600">
               <div>
                 <div class="font-semibold text-sm">Jadwal</div>
                 <div class="text-xs text-gray-500">Tentukan tanggal dan jam</div>
@@ -1117,11 +1213,11 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           <div x-show="wizardData.modeJadwal === 'jadwal'" class="p-3 bg-blue-50/50 border border-blue-200 rounded-lg max-w-md grid grid-cols-2 gap-3 mb-4">
             <div>
               <label class="block text-xs font-semibold text-gray-700 mb-1">Tanggal Kirim *</label>
-              <input type="date" x-model="wizardData.tglJadwal" class="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white">
+              <input type="date" x-model="wizardData.tglJadwal" @change="recalculateRecipientSchedules()" class="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white">
             </div>
             <div>
               <label class="block text-xs font-semibold text-gray-700 mb-1">Jam (WIB) *</label>
-              <input type="time" x-model="wizardData.jamJadwal" class="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white">
+              <input type="time" x-model="wizardData.jamJadwal" @change="recalculateRecipientSchedules()" class="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white">
             </div>
             <div class="col-span-2 text-[11px] text-gray-500">Zona waktu: Asia/Jakarta (WIB)</div>
           </div>
@@ -1133,19 +1229,19 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           <div class="grid grid-cols-2 gap-4 max-w-md">
             <div>
               <label class="block text-xs font-semibold text-gray-600 mb-1">Jeda Min (Menit)</label>
-              <input type="number" min="1" max="60" x-model.number="wizardData.jedaMin" class="w-full p-2 border rounded-lg text-sm">
+              <input type="number" min="1" max="60" x-model.number="wizardData.jedaMin" @input="recalculateRecipientSchedules()" class="w-full p-2 border rounded-lg text-sm">
             </div>
             <div>
               <label class="block text-xs font-semibold text-gray-600 mb-1">Jeda Max (Menit)</label>
-              <input type="number" min="1" max="60" x-model.number="wizardData.jedaMax" class="w-full p-2 border rounded-lg text-sm">
+              <input type="number" min="1" max="60" x-model.number="wizardData.jedaMax" @input="recalculateRecipientSchedules()" class="w-full p-2 border rounded-lg text-sm">
             </div>
           </div>
           <span class="text-[11px] text-gray-400 mt-1 block">Rentang 1 - 60 menit. Waktu di luar jam operasional otomatis dialihkan ke hari kerja berikutnya.</span>
         </div>
       </div>
 
-      <!-- STEP 5: AKSI TAG (F-22, BR-03) -->
-      <div x-show="wizardStep === 5" class="space-y-4">
+      <!-- STEP 4: AKSI TAG (F-22, BR-03) -->
+      <div x-show="wizardStep === 4" class="space-y-4">
         <h3 class="font-semibold text-gray-800 text-sm">Aksi Tag Otomatis (Saat Terkirim)</h3>
         <p class="text-xs text-gray-500">Pilih tag yang ingin ditambahkan atau dihapus dari kontak setelah pesan berhasil terkirim.</p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1174,47 +1270,91 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
         </div>
       </div>
 
-      <!-- STEP 6: PRE-FLIGHT CHECK & REVIEW -->
-      <div x-show="wizardStep === 6" class="space-y-4">
-        <h3 class="font-semibold text-gray-800 text-sm">Ringkasan Validasi Pre-flight</h3>
-        
-        <div x-show="loadingPreflight" class="py-8 text-center text-gray-500 text-sm">
-          <i data-lucide="loader" class="w-6 h-6 animate-spin mx-auto text-blue-600 mb-2"></i>
-          Menghitung ketersediaan penerima, memeriksa antrean aktif, dan masa cooldown...
+      <!-- STEP 5: DAFTAR PENERIMA SEBELUM JADWALKAN (PRD v1.10) -->
+      <div x-show="wizardStep === 5" class="space-y-4">
+        <!-- Perkiraan Jadwal (Perubahan 4) -->
+        <div class="p-4 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-1">
+            <div class="font-bold text-blue-950 text-sm flex items-center space-x-2">
+              <i data-lucide="clock" class="w-4 h-4 text-blue-600"></i>
+              <span>Perkiraan Jadwal Pengiriman:</span>
+            </div>
+            <div class="text-blue-900 font-semibold" x-text="scheduleEstimate.rangeText || '-'"></div>
+          </div>
+          <div class="text-xs text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
+            <span>Penerima Tercentang: <strong class="text-gray-900" x-text="getCheckedRecipientsCount()"></strong></span>
+            <span>Jeda Acak: <strong class="text-gray-900" x-text="wizardData.jedaMin + ' - ' + wizardData.jedaMax + ' menit'"></strong></span>
+            <span>Total Durasi: <strong class="text-gray-900" x-text="scheduleEstimate.durationText || '-'"></strong></span>
+          </div>
+          <!-- Peringatan Melewati Jam Operasional -->
+          <div x-show="scheduleEstimate.exceedsOperational" class="p-2.5 bg-amber-100 border border-amber-300 text-amber-900 rounded-lg text-xs flex items-center space-x-2 mt-1">
+            <i data-lucide="alert-triangle" class="w-4 h-4 flex-shrink-0 text-amber-700"></i>
+            <span>Perhatian: Perkiraan selesai pengiriman melewati batas jam kirim operasional (<span x-text="settings.jam_kirim_selesai"></span>). Pengiriman yang melewati jam ini otomatis digeser ke jam kirim esok hari.</span>
+          </div>
         </div>
 
-        <div x-show="!loadingPreflight" class="space-y-3">
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-xs">
-            <div class="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div class="font-bold text-lg text-blue-700" x-text="preflight.totalEligible || 0"></div>
-              <div class="text-gray-600">Penerima Siap Kirim</div>
-            </div>
-            <div class="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div class="font-bold text-lg text-yellow-700" x-text="preflight.inCooldown || 0"></div>
-              <div class="text-gray-600">Dalam Cooldown (7 hari)</div>
-            </div>
-            <div class="p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div class="font-bold text-lg text-red-700" x-text="preflight.inActiveJob || 0"></div>
-              <div class="text-gray-600">Dilewati (Job Aktif Lain)</div>
-            </div>
-            <div class="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-              <div class="font-bold text-lg text-gray-700" x-text="preflight.optedOut || 0"></div>
-              <div class="text-gray-600">Dilewati (Opt-Out)</div>
-            </div>
+        <!-- Tombol Aksi Massal Penerima -->
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <div class="flex items-center space-x-2 text-xs">
+            <button type="button" @click="checkAllRecipients(true)" class="px-2.5 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 rounded text-gray-700 font-medium">
+              Centang Semua
+            </button>
+            <button type="button" @click="checkAllRecipients(false)" class="px-2.5 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 rounded text-gray-700 font-medium">
+              Hapus Centang Semua
+            </button>
+            <button type="button" @click="uncheckWarningRecipients()" class="px-2.5 py-1.5 bg-amber-50 border border-amber-300 hover:bg-amber-100 rounded text-amber-800 font-medium">
+              Hapus Baris yang Bertanda Peringatan
+            </button>
           </div>
+          <div class="text-xs text-gray-500 font-medium">
+            <span x-text="getCheckedRecipientsCount()"></span> dari <span x-text="wizardRecipients.length"></span> penerima siap
+          </div>
+        </div>
 
-          <!-- Cooldown Override Checkbox (F-20, AC-11) -->
-          <div x-show="preflight.inCooldown > 0" class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs">
-            <label class="flex items-center space-x-2 cursor-pointer font-medium text-amber-900">
-              <input type="checkbox" x-model="wizardData.overrideCooldown" class="rounded text-amber-600">
-              <span>Tetap masukkan <strong x-text="preflight.inCooldown"></strong> kontak yang masih dalam masa cooldown 7 hari</span>
-            </label>
-          </div>
+        <!-- Tabel Daftar Penerima -->
+        <div class="border rounded-lg overflow-hidden max-h-72 overflow-y-auto bg-white shadow-sm">
+          <table class="w-full text-left text-xs text-gray-600">
+            <thead class="bg-gray-50 text-gray-700 border-b sticky top-0 uppercase text-[11px]">
+              <tr>
+                <th class="py-2.5 px-3 w-8">
+                  <input type="checkbox" @change="checkAllRecipients($event.target.checked)" :checked="isAllRecipientsChecked()" class="rounded text-blue-600">
+                </th>
+                <th class="py-2.5 px-3 w-12 text-center">No.</th>
+                <th class="py-2.5 px-3">Nama</th>
+                <th class="py-2.5 px-3">No. HP</th>
+                <th class="py-2.5 px-3">Perkiraan Waktu Kirim</th>
+                <th class="py-2.5 px-3">Peringatan</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <template x-for="(r, idx) in wizardRecipients" :key="r.id">
+                <tr :class="r.warning ? 'bg-amber-50/70' : 'hover:bg-gray-50'">
+                  <td class="py-2 px-3">
+                    <input type="checkbox" x-model="r.checked" @change="recalculateRecipientSchedules()" class="rounded text-blue-600">
+                  </td>
+                  <td class="py-2 px-3 text-center text-gray-400 font-mono" x-text="idx + 1"></td>
+                  <td class="py-2 px-3 font-semibold text-gray-900" x-text="r.nama"></td>
+                  <td class="py-2 px-3 font-mono text-gray-700" x-text="r.no_hp"></td>
+                  <td class="py-2 px-3 font-mono whitespace-nowrap" :class="r.checked ? 'text-blue-700 font-semibold' : 'text-gray-300'" x-text="r.checked ? (r.estimatedTimeStr || '-') : '-'"></td>
+                  <td class="py-2 px-3">
+                    <span x-show="r.warning" class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                      <i data-lucide="alert-circle" class="w-3 h-3 flex-shrink-0"></i>
+                      <span x-text="r.warning"></span>
+                    </span>
+                    <span x-show="!r.warning" class="text-emerald-700 text-[11px]">Siap</span>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="wizardRecipients.length === 0">
+                <td colspan="6" class="py-8 text-center text-gray-400">Tidak ada kontak yang cocok dengan filter di langkah 1.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
-          <div>
-            <label class="block text-xs font-semibold text-gray-600 mb-1">Nama Kampanye / Job *</label>
-            <input type="text" x-model="wizardData.namaJob" class="w-full p-2 border rounded-lg text-sm" placeholder="Contoh: Flash Sale Akhir Bulan">
-          </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Nama Kampanye / Job Broadcast *</label>
+          <input type="text" x-model="wizardData.namaJob" class="w-full p-2 border rounded-lg text-sm" placeholder="Contoh: Flash Sale Akhir Bulan">
         </div>
       </div>
 
@@ -1225,13 +1365,13 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
         </button>
         <div x-show="wizardStep === 1"></div>
 
-        <button x-show="wizardStep < 6" @click="nextWizardStep()" :disabled="!isCurrentStepValid()" class="btn-primary px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+        <button x-show="wizardStep < 5" @click="nextWizardStep()" :disabled="!isCurrentStepValid()" class="btn-primary px-5 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
           Lanjut &rarr;
         </button>
 
-        <button x-show="wizardStep === 6" @click="confirmExecuteBroadcast()" :disabled="saving || !isPreflightReady()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg text-sm font-bold shadow-md inline-flex items-center space-x-2 disabled:opacity-40">
+        <button x-show="wizardStep === 5" @click="confirmExecuteBroadcast()" :disabled="saving || getCheckedRecipientsCount() === 0 || !wizardData.namaJob.trim()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg text-sm font-bold shadow-md inline-flex items-center space-x-2 disabled:opacity-40 disabled:cursor-not-allowed">
           <i data-lucide="loader" class="w-4 h-4 animate-spin" x-show="saving"></i>
-          <span>Jalankan Broadcast</span>
+          <span>Jadwalkan</span>
         </button>
       </div>
 
@@ -1514,6 +1654,34 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
     </div>
   </div>
 
+  <!-- MODAL: AKSI MASSAL PEMILIK KONTAK (PRD v1.10) -->
+  <div x-show="modals.modalBulkPemilik" x-cloak class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div @click.away="closeModal('modalBulkPemilik')" class="bg-white rounded-lg max-w-sm w-full p-5 shadow-xl space-y-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-gray-900 text-sm" x-text="bulkPemilikMode === 'tambah' ? 'Tambah Pemilik Massal' : 'Lepas Pemilik Massal'"></h3>
+        <button @click="closeModal('modalBulkPemilik')" class="text-gray-400 hover:text-gray-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="space-y-3 text-xs text-gray-600">
+        <p>Aksi ini akan diterapkan pada <strong x-text="selectedKontakIds.length"></strong> kontak terpilih tanpa menghapus kontak.</p>
+        <div>
+          <label class="block font-semibold text-gray-700 mb-1">Pilih Nomor Pemilik:</label>
+          <select x-model="bulkTargetOwnerId" class="w-full p-2 border rounded-lg text-xs bg-white">
+            <template x-for="p in pengirimList" :key="p.id">
+              <option :value="p.id" x-text="p.label + ' (' + p.no_hp + ')'"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-2 border-t">
+        <button @click="closeModal('modalBulkPemilik')" class="px-3 py-1.5 border rounded-lg text-xs text-gray-600">Batal</button>
+        <button @click="executeBulkPemilikAction()" :disabled="saving" class="btn-primary px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center space-x-1">
+          <i data-lucide="loader" class="w-3.5 h-3.5 animate-spin" x-show="saving"></i>
+          <span>Terapkan</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL: DIALOG KONFIRMASI UMUM (NO BROWSER ALERT/CONFIRM) -->
   <div x-show="modals.modalConfirm" x-cloak class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
     <div class="bg-white rounded-lg max-w-sm w-full p-5 shadow-2xl space-y-4">
@@ -1546,6 +1714,7 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
       return {
         currentTab: 'dashboard',
         mobileMenuOpen: false,
+        activeSenderId: '',
         loading: false,
         loadingKontak: false,
         saving: false,
@@ -1571,6 +1740,9 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
 
         dashboard: { alertPengirim: [], tahapStats: {}, pengirimList: [], recentBroadcasts: [] },
         kontakList: [],
+        selectedKontakIds: [],
+        bulkPemilikMode: 'tambah',
+        bulkTargetOwnerId: '',
         kontakFilter: { search: '', tahap: '', tag: '', optOut: '' },
         tagList: [],
         tagAturanList: [],
@@ -1592,11 +1764,12 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           modalPengirim: false,
           modalWizard: false,
           modalJobDetail: false,
+          modalBulkPemilik: false,
           modalConfirm: false
         },
 
         // Forms state
-        formKontak: { id: '', nama: '', no_hp: '', email: '', kota: '', sumber: '', tahap: 'baru', catatan: '', opt_out: false, tagIds: [] },
+        formKontak: { id: '', nama: '', no_hp: '', email: '', kota: '', sumber: '', tahap: 'baru', catatan: '', opt_out: false, tagIds: [], pemilik_ids: [] },
         formTag: { id: '', nama: '', keterangan: '' },
         formTagAturan: { id: '', id_tag_pemicu: '', aksi: 'hapus', id_tag_target: '' },
         formSegmen: { id: '', nama: '', operator: 'AND', tahap: '', tag: '', kota: '', sumber: '' },
@@ -1633,11 +1806,47 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
 
         initApp: function() {
           var self = this;
-          self.loadDashboard();
+          try {
+            var saved = localStorage.getItem('okegas_active_sender_id');
+            if (saved) self.activeSenderId = saved;
+          } catch (e) {}
+
+          self.loadPengirim(function() {
+            if (!self.activeSenderId && self.pengirimList && self.pengirimList.length > 0) {
+              self.activeSenderId = self.pengirimList[0].id;
+              try {
+                localStorage.setItem('okegas_active_sender_id', self.activeSenderId);
+              } catch (e) {}
+            }
+            self.loadDashboard();
+          });
           self.loadSettings();
           setTimeout(function() {
             lucide.createIcons();
           }, 300);
+        },
+
+        getActiveSender: function() {
+          var self = this;
+          return self.pengirimList.find(function(p) { return p.id === self.activeSenderId; }) || null;
+        },
+
+        getActiveSenderStatus: function() {
+          var s = this.getActiveSender();
+          return s ? (s.status) : '';
+        },
+
+        onActiveSenderChange: function() {
+          var self = this;
+          try {
+            localStorage.setItem('okegas_active_sender_id', self.activeSenderId);
+          } catch (e) {}
+          self.selectedKontakIds = [];
+          if (self.currentTab === 'kontak') self.loadKontakList();
+          if (self.currentTab === 'segmen') self.loadSegmen();
+          if (self.currentTab === 'dashboard') self.loadDashboard();
+          if (self.modals.modalWizard) self.wizardData.idPengirim = self.activeSenderId;
+          self.$nextTick(function() { lucide.createIcons(); });
         },
 
         showToast: function(msg, type) {
@@ -1692,19 +1901,83 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
         loadKontakList: function() {
           var self = this;
           self.loadingKontak = true;
+          var filterPayload = Object.assign({}, self.kontakFilter, { id_pemilik: self.activeSenderId });
           google.script.run.withSuccessHandler(function(res) {
             self.loadingKontak = false;
             if (res && res.ok) {
               self.kontakList = res.data;
+              self.selectedKontakIds = [];
             }
             self.$nextTick(function() { lucide.createIcons(); });
           }).withFailureHandler(function(err) {
             self.loadingKontak = false;
             self.showToast('Error kontak: ' + err.message, 'error');
-          }).getKontakList(self.kontakFilter);
+          }).getKontakList(filterPayload);
+        },
+
+        toggleSelectAllKontak: function(event) {
+          if (event.target.checked) {
+            this.selectedKontakIds = this.kontakList.map(function(k) { return k.id; });
+          } else {
+            this.selectedKontakIds = [];
+          }
+        },
+
+        isAllKontakSelected: function() {
+          return this.kontakList.length > 0 && this.selectedKontakIds.length === this.kontakList.length;
+        },
+
+        openModalBulkPemilik: function(mode) {
+          this.bulkPemilikMode = mode;
+          this.bulkTargetOwnerId = this.activeSenderId || (this.pengirimList[0] ? this.pengirimList[0].id : '');
+          this.openModal('modalBulkPemilik');
+        },
+
+        executeBulkPemilikAction: function() {
+          var self = this;
+          if (!self.bulkTargetOwnerId) {
+            self.showToast('Pilih nomor pemilik.', 'error');
+            return;
+          }
+          self.saving = true;
+          var handler = self.bulkPemilikMode === 'tambah' ? 'bulkAddKontakPemilik' : 'bulkRemoveKontakPemilik';
+          google.script.run.withSuccessHandler(function(res) {
+            self.saving = false;
+            if (res && res.ok) {
+              self.showToast(self.bulkPemilikMode === 'tambah' ? 'Berhasil menambahkan pemilik ke kontak terpilih.' : 'Berhasil melepas pemilik dari kontak terpilih.');
+              self.closeModal('modalBulkPemilik');
+              self.loadKontakList();
+            } else {
+              self.showToast(res ? res.message : 'Gagal memproses aksi massal', 'error');
+            }
+          }).withFailureHandler(function(err) {
+            self.saving = false;
+            self.showToast('Error: ' + err.message, 'error');
+          })[handler](self.selectedKontakIds, self.bulkTargetOwnerId);
+        },
+
+        triggerMigrasiPemilik: function() {
+          var self = this;
+          self.confirmDialog = {
+            title: 'Jalankan Migrasi Pemilik?',
+            message: 'Setiap kontak yang belum memiliki pemilik akan didaftarkan ke pemilik pertama.',
+            isDanger: false,
+            callback: function() {
+              google.script.run.withSuccessHandler(function(res) {
+                if (res && res.ok) {
+                  self.showToast(res.message);
+                  self.loadKontakList();
+                } else {
+                  self.showToast(res.message, 'error');
+                }
+              }).migrateKontakPemilik();
+            }
+          };
+          self.openModal('modalConfirm');
         },
 
         openModalKontak: function(item) {
+          var defaultOwners = this.activeSenderId ? [this.activeSenderId] : [];
           if (item) {
             this.formKontak = {
               id: item.id,
@@ -1716,10 +1989,11 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
               tahap: item.tahap || 'baru',
               catatan: item.catatan || '',
               opt_out: !!item.opt_out,
-              tagIds: (item.tags || []).map(function(t) { return t.id; })
+              tagIds: (item.tags || []).map(function(t) { return t.id; }),
+              pemilik_ids: (item.pemilik_ids && item.pemilik_ids.length > 0) ? item.pemilik_ids.slice() : defaultOwners
             };
           } else {
-            this.formKontak = { id: '', nama: '', no_hp: '', email: '', kota: '', sumber: '', tahap: 'baru', catatan: '', opt_out: false, tagIds: [] };
+            this.formKontak = { id: '', nama: '', no_hp: '', email: '', kota: '', sumber: '', tahap: 'baru', catatan: '', opt_out: false, tagIds: [], pemilik_ids: defaultOwners };
           }
           this.openModal('modalKontak');
         },
@@ -1777,12 +2051,12 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
             self.saving = false;
             if (res && res.ok) {
               self.importResults = res.data;
-              self.showToast('Impor selesai: ' + res.data.imported + ' berhasil, ' + res.data.rejected.length + ' gagal.');
+              self.showToast('Impor selesai: ' + res.data.imported + ' baru, ' + (res.data.updatedOwner || 0) + ' pemilik diperbarui.');
               self.loadKontakList();
             } else {
               self.showToast(res.message, 'error');
             }
-          }).importKontakCsv(self.csvText);
+          }).importKontakCsv(self.csvText, self.activeSenderId);
         },
 
         // TAGS & RULES (AC-05)
@@ -1915,7 +2189,7 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           google.script.run.withSuccessHandler(function(res) {
             if (res && res.ok) self.segmenList = res.data;
             self.$nextTick(function() { lucide.createIcons(); });
-          }).getSegmenList();
+          }).getSegmenList(self.activeSenderId);
         },
 
         formatKondisi: function(kondisiStr) {
@@ -1956,7 +2230,8 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           var payload = {
             id: self.formSegmen.id,
             nama: self.formSegmen.nama,
-            kondisi_json: JSON.stringify(kondisi)
+            kondisi_json: JSON.stringify(kondisi),
+            id_pemilik: self.activeSenderId
           };
           self.saving = true;
           google.script.run.withSuccessHandler(function(res) {
@@ -2003,10 +2278,13 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
         },
 
         // PENGIRIM (F-11, F-12)
-        loadPengirim: function() {
+        loadPengirim: function(callback) {
           var self = this;
           google.script.run.withSuccessHandler(function(res) {
-            if (res && res.ok) self.pengirimList = res.data;
+            if (res && res.ok) {
+              self.pengirimList = res.data;
+              if (callback) callback();
+            }
             self.$nextTick(function() { lucide.createIcons(); });
           }).getPengirimList();
         },
@@ -2179,13 +2457,14 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           }).toggleTemplateStatus(t.id);
         },
 
-        // BROADCAST WIZARD (F-13)
+        // BROADCAST WIZARD (PRD v1.10)
         startWizard: function() {
           this.wizardStep = 1;
+          this.wizardFilter = { operator: 'AND', tag: '', tahap: '', kota: '', sumber: '', optOut: 'false', search: '' };
+          this.wizardRecipients = [];
+          this.targetPreviewCount = 0;
           this.wizardData = {
-            targetMode: 'semua',
-            segmenId: '',
-            idPengirim: '',
+            idPengirim: this.activeSenderId,
             idTemplate: '',
             isiPesan: '',
             modeJadwal: 'sekarang',
@@ -2195,13 +2474,144 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
             jedaMax: parseInt(this.settings.jeda_default_max, 10) || 10,
             tagTambahIds: [],
             tagHapusIds: [],
-            namaJob: '',
-            overrideCooldown: false
+            namaJob: ''
           };
           this.loadPengirim();
           this.loadTemplates();
+          this.loadSegmen();
           this.loadTags();
+          this.loadTargetPreview();
           this.openModal('modalWizard');
+        },
+
+        resetWizardFilter: function() {
+          this.wizardFilter = { operator: 'AND', tag: '', tahap: '', kota: '', sumber: '', optOut: 'false', search: '' };
+          this.loadTargetPreview();
+        },
+
+        loadTargetPreview: function() {
+          var self = this;
+          self.loadingTargetPreview = true;
+          google.script.run.withSuccessHandler(function(res) {
+            self.loadingTargetPreview = false;
+            if (res && res.ok) {
+              self.targetPreviewCount = res.data.count;
+              self.wizardRecipients = res.data.items.map(function(item) {
+                item.checked = true;
+                return item;
+              });
+              self.recalculateRecipientSchedules();
+            }
+            self.$nextTick(function() { lucide.createIcons(); });
+          }).withFailureHandler(function() {
+            self.loadingTargetPreview = false;
+          }).getTargetRecipientsPreview(self.wizardFilter, self.activeSenderId);
+        },
+
+        promptSaveFilterAsSegmen: function() {
+          this.formSegmen = {
+            id: '',
+            nama: '',
+            operator: this.wizardFilter.operator || 'AND',
+            tahap: this.wizardFilter.tahap || '',
+            tag: this.wizardFilter.tag || '',
+            kota: this.wizardFilter.kota || '',
+            sumber: this.wizardFilter.sumber || ''
+          };
+          this.openModal('modalSegmen');
+        },
+
+        applySavedSegmenToFilter: function(segId) {
+          if (!segId) return;
+          var s = this.segmenList.find(function(x) { return x.id === segId; });
+          if (!s || !s.kondisi_json) return;
+          try {
+            var k = typeof s.kondisi_json === 'string' ? JSON.parse(s.kondisi_json) : s.kondisi_json;
+            this.wizardFilter.operator = k.operator || 'AND';
+            this.wizardFilter.tag = k.tag || '';
+            this.wizardFilter.tahap = k.tahap || '';
+            this.wizardFilter.kota = k.kota || '';
+            this.wizardFilter.sumber = k.sumber || '';
+            this.wizardFilter.optOut = k.optOut !== undefined ? k.optOut : 'false';
+            this.wizardFilter.search = k.search || '';
+            this.loadTargetPreview();
+            this.showToast('Filter segmen "' + s.nama + '" diterapkan.');
+          } catch (e) {}
+        },
+
+        getCheckedRecipientsCount: function() {
+          return this.wizardRecipients.filter(function(r) { return r.checked; }).length;
+        },
+
+        checkAllRecipients: function(bool) {
+          this.wizardRecipients.forEach(function(r) { r.checked = bool; });
+          this.recalculateRecipientSchedules();
+        },
+
+        isAllRecipientsChecked: function() {
+          return this.wizardRecipients.length > 0 && this.wizardRecipients.every(function(r) { return r.checked; });
+        },
+
+        uncheckWarningRecipients: function() {
+          this.wizardRecipients.forEach(function(r) {
+            if (r.warning) r.checked = false;
+          });
+          this.recalculateRecipientSchedules();
+        },
+
+        recalculateRecipientSchedules: function() {
+          var self = this;
+          var checkedList = self.wizardRecipients.filter(function(r) { return r.checked; });
+          if (checkedList.length === 0) {
+            self.scheduleEstimate = { rangeText: '-', durationText: '-', exceedsOperational: false };
+            return;
+          }
+
+          var now = new Date();
+          var startDate = now;
+          if (self.wizardData.modeJadwal === 'jadwal' && self.wizardData.tglJadwal && self.wizardData.jamJadwal) {
+            var parsed = new Date(self.wizardData.tglJadwal + 'T' + self.wizardData.jamJadwal + ':00+07:00');
+            if (!isNaN(parsed.getTime())) startDate = parsed;
+          }
+
+          var jamMulai = self.settings.jam_kirim_mulai || '08:00';
+          var jamSelesai = self.settings.jam_kirim_selesai || '21:00';
+          if (jamMulai.length === 4) jamMulai = '0' + jamMulai;
+          if (jamSelesai.length === 4) jamSelesai = '0' + jamSelesai;
+
+          var jMin = Math.max(1, Math.min(60, parseInt(self.wizardData.jedaMin, 10) || 1));
+          var jMax = Math.max(jMin, Math.min(60, parseInt(self.wizardData.jedaMax, 10) || 10));
+          var avgJeda = (jMin + jMax) / 2;
+
+          var cur = new Date(startDate.getTime());
+          var exceeds = false;
+
+          checkedList.forEach(function(item, idx) {
+            if (idx > 0) {
+              cur = new Date(cur.getTime() + (avgJeda * 60 * 1000));
+            }
+            var h = String(cur.getHours()).padStart(2, '0');
+            var m = String(cur.getMinutes()).padStart(2, '0');
+            var timeOnly = h + ':' + m;
+
+            if (timeOnly > jamSelesai || timeOnly < jamMulai) {
+              exceeds = true;
+            }
+            item.estimatedTimeStr = cur.getFullYear() + '-' +
+              String(cur.getMonth() + 1).padStart(2, '0') + '-' +
+              String(cur.getDate()).padStart(2, '0') + ' ' + timeOnly;
+          });
+
+          var startFmt = String(startDate.getHours()).padStart(2, '0') + ':' + String(startDate.getMinutes()).padStart(2, '0');
+          var endFmt = String(cur.getHours()).padStart(2, '0') + ':' + String(cur.getMinutes()).padStart(2, '0');
+          var totalMin = Math.round((cur.getTime() - startDate.getTime()) / (60 * 1000));
+
+          self.scheduleEstimate = {
+            rangeText: 'sekitar ' + startFmt + ' sampai ' + endFmt,
+            durationText: totalMin + ' menit (' + (Math.round((totalMin / 60) * 10) / 10) + ' jam)',
+            exceedsOperational: exceeds
+          };
+          self.$nextTick(function() { lucide.createIcons(); });
         },
 
         onTemplateChange: function() {
@@ -2221,15 +2631,12 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
 
         isCurrentStepValid: function() {
           if (this.wizardStep === 1) {
-            return this.wizardData.targetMode === 'semua' || (this.wizardData.targetMode === 'segmen' && !!this.wizardData.segmenId);
+            return this.targetPreviewCount > 0;
           }
           if (this.wizardStep === 2) {
-            return !!this.wizardData.idPengirim;
-          }
-          if (this.wizardStep === 3) {
             return !!this.wizardData.idTemplate;
           }
-          if (this.wizardStep === 4) {
+          if (this.wizardStep === 3) {
             var min = parseInt(this.wizardData.jedaMin, 10);
             var max = parseInt(this.wizardData.jedaMax, 10);
             var validDelay = !isNaN(min) && !isNaN(max) && min >= 1 && min <= 60 && max >= min && max <= 60;
@@ -2238,8 +2645,11 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
             }
             return validDelay;
           }
-          if (this.wizardStep === 5) {
+          if (this.wizardStep === 4) {
             return true;
+          }
+          if (this.wizardStep === 5) {
+            return this.getCheckedRecipientsCount() > 0 && !!this.wizardData.namaJob.trim();
           }
           return true;
         },
@@ -2247,52 +2657,45 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
         nextWizardStep: function() {
           if (!this.isCurrentStepValid()) return;
           this.wizardStep++;
-          if (this.wizardStep === 6) {
-            this.runPreflightCheck();
+          if (this.wizardStep === 5) {
+            this.recalculateRecipientSchedules();
           }
           this.$nextTick(function() { lucide.createIcons(); });
         },
 
-        runPreflightCheck: function() {
-          var self = this;
-          self.loadingPreflight = true;
-          google.script.run.withSuccessHandler(function(res) {
-            self.loadingPreflight = false;
-            if (res && res.ok) {
-              self.preflight = res.data;
-            } else {
-              self.showToast('Preflight error: ' + res.message, 'error');
-            }
-          }).calculateBroadcastPreflight(self.wizardData);
-        },
-
-        isPreflightReady: function() {
-          var total = this.wizardData.overrideCooldown ? (this.preflight.totalEligible + this.preflight.inCooldown) : this.preflight.totalEligible;
-          return total > 0 && !!this.wizardData.namaJob.trim();
-        },
-
         confirmExecuteBroadcast: function() {
           var self = this;
-          var p = self.pengirimList.find(function(x) { return x.id === self.wizardData.idPengirim; });
-          var senderLabel = p ? p.label : 'Pengirim';
-          var total = self.wizardData.overrideCooldown ? (self.preflight.totalEligible + self.preflight.inCooldown) : self.preflight.totalEligible;
+          var p = self.getActiveSender();
+          var senderLabel = p ? p.label : 'Nomor Aktif';
+          var checkedItems = self.wizardRecipients.filter(function(r) { return r.checked; });
+          var total = checkedItems.length;
 
           self.confirmDialog = {
-            title: 'Jalankan Broadcast Sekarang?',
+            title: 'Jalankan / Jadwalkan Broadcast?',
             message: 'Kirim broadcast ke ' + total + ' kontak terpilih lewat pengirim: ' + senderLabel + '?',
             isDanger: false,
             callback: function() {
               self.saving = true;
+              var payload = Object.assign({}, self.wizardData, {
+                idPengirim: self.activeSenderId,
+                selectedRecipients: checkedItems.map(function(r) {
+                  return {
+                    id_kontak: r.id,
+                    lanjut_walau_cooldown: !!r.is_cooldown
+                  };
+                })
+              });
+
               google.script.run.withSuccessHandler(function(res) {
                 self.saving = false;
                 if (res && res.ok) {
-                  self.showToast('Job broadcast berhasil dijadwalkan dan antrean dibuat.');
+                  self.showToast('Job broadcast berhasil dijadwalkan dan ' + res.data.count + ' antrean dibuat.');
                   self.closeModal('modalWizard');
                   self.loadTabContent('broadcast');
                 } else {
-                  self.showToast(res.message, 'error');
+                  self.showToast(res ? res.message : 'Gagal membuat job', 'error');
                 }
-              }).createBroadcastJob(self.wizardData);
+              }).createBroadcastJob(payload);
             }
           };
           self.openModal('modalConfirm');

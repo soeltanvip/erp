@@ -68,7 +68,8 @@ function setupDatabase() {
     { name: 'Kontak_Tag', headers: ['id_kontak', 'id_tag', 'ditambahkan_pada'] },
     { name: 'Tag', headers: ['id', 'nama', 'keterangan', 'dibuat_pada'] },
     { name: 'Tag_Aturan', headers: ['id', 'id_tag_pemicu', 'aksi', 'id_tag_target'] },
-    { name: 'Segmen', headers: ['id', 'nama', 'kondisi_json', 'dibuat_pada'] },
+    { name: 'Segmen', headers: ['id', 'nama', 'kondisi_json', 'dibuat_pada', 'id_pemilik'] },
+    { name: 'Kontak_Pemilik', headers: ['id_kontak', 'id_pemilik', 'ditambahkan_pada'] },
     { name: 'Template', headers: ['id', 'nama', 'isi_pesan', 'variabel', 'aktif', 'dibuat_pada'] },
     { name: 'Pengirim', headers: ['id', 'label', 'no_hp', 'device_id', 'status', 'kuota_harian', 'terpakai_hari_ini', 'tanggal_reset', 'terakhir_dipakai_pada', 'catatan', 'bales_number_id'] },
     { name: 'Broadcast_Job', headers: ['id', 'kampanye_id', 'id_job_induk', 'nama', 'id_template', 'id_pengirim', 'jeda_min', 'jeda_max', 'status', 'jumlah_target', 'dibuat_pada'] },
@@ -113,8 +114,71 @@ function setupDatabase() {
     ruleSheet.appendRow(['rule_1', 'tag_tertarik', 'hapus', 'tag_dingin']);
   }
 
+  // Auto-migrasi pemilik jika Kontak_Pemilik masih kosong
+  var kpSheet = ss.getSheetByName('Kontak_Pemilik');
+  var kSheet = ss.getSheetByName('Kontak');
+  if (kpSheet && kpSheet.getLastRow() <= 1 && kSheet && kSheet.getLastRow() > 1) {
+    migrateKontakPemilik();
+  }
+
   writeLog('SETUP_DATABASE', 'SYSTEM', 'Database initialized or refreshed headers.');
   return { ok: true, message: 'Database schema successfully updated.' };
+}
+
+/**
+ * MIGRASI DATA KONTAK KE PEMILIK PERTAMA (PRD v1.10)
+ */
+function migrateKontakPemilik() {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var pSheet = ss.getSheetByName('Pengirim');
+    var pData = pSheet ? pSheet.getDataRange().getValues() : [];
+    if (pData.length <= 1) {
+      return { ok: false, message: 'Belum ada data Pengirim untuk dijadikan pemilik migrasi.' };
+    }
+    var defaultOwnerId = String(pData[1][0]);
+
+    var kpSheet = ss.getSheetByName('Kontak_Pemilik');
+    if (!kpSheet) {
+      setupDatabase();
+      kpSheet = ss.getSheetByName('Kontak_Pemilik');
+    }
+    var kpData = kpSheet.getDataRange().getValues();
+    var existingPairs = {};
+    for (var j = 1; j < kpData.length; j++) {
+      existingPairs[String(kpData[j][0]) + '_' + String(kpData[j][1])] = true;
+    }
+
+    var kSheet = ss.getSheetByName('Kontak');
+    var kData = kSheet.getDataRange().getValues();
+    var rowsToAppend = [];
+    var nowIso = new Date().toISOString();
+
+    for (var i = 1; i < kData.length; i++) {
+      var cId = String(kData[i][0]);
+      var key = cId + '_' + defaultOwnerId;
+      if (!existingPairs[key]) {
+        rowsToAppend.push([cId, defaultOwnerId, nowIso]);
+        existingPairs[key] = true;
+      }
+    }
+
+    if (rowsToAppend.length > 0) {
+      kpSheet.getRange(kpSheet.getLastRow() + 1, 1, rowsToAppend.length, 3).setValues(rowsToAppend);
+      writeLog('MIGRASI_PEMILIK', defaultOwnerId, 'Migrasi ' + rowsToAppend.length + ' kontak ke pemilik pertama ' + defaultOwnerId);
+    }
+
+    return {
+      ok: true,
+      message: 'Migrasi berhasil: ' + rowsToAppend.length + ' kontak ditambahkan ke pemilik pertama (' + String(pData[1][1]) + ').'
+    };
+  } catch (err) {
+    return { ok: false, message: 'Gagal migrasi pemilik: ' + err.message };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
@@ -251,16 +315,25 @@ function getKontakList(filter) {
 
     var tagMap = getKontakTagMap();
     var senderMap = getSenderLabelMap();
+    var pemilikMap = getKontakPemilikMap();
     var results = [];
 
     var search = (filter && filter.search) ? String(filter.search).toLowerCase() : '';
     var tahap = (filter && filter.tahap) ? String(filter.tahap).toLowerCase() : '';
     var tagFilter = (filter && filter.tag) ? String(filter.tag) : '';
     var optOutFilter = (filter && filter.optOut !== undefined && filter.optOut !== '') ? String(filter.optOut) === 'true' : null;
+    var idPemilik = (filter && filter.id_pemilik) ? String(filter.id_pemilik) : '';
 
     for (var i = 1; i < data.length; i++) {
       var row = data[i];
       var kId = String(row[0]);
+      var owners = pemilikMap[kId] || [];
+
+      // Filter nomor aktif sebagai pemilik (PRD v1.10)
+      if (idPemilik && owners.indexOf(idPemilik) === -1) {
+        continue;
+      }
+
       var nama = String(row[1]);
       var noHp = String(row[2]);
       var email = String(row[3]);
@@ -302,7 +375,8 @@ function getKontakList(filter) {
         terakhir_dikirim_pada: tglKirim,
         terakhir_pengirim_id: pengirimId,
         terakhir_pengirim_label: senderMap[pengirimId] || '',
-        tags: tags
+        tags: tags,
+        pemilik_ids: owners
       });
     }
 
@@ -381,6 +455,13 @@ function saveKontak(kontakData) {
       syncKontakTags(idKontak, kontakData.tagIds);
     }
 
+    // Update Pemilik Relasional (PRD v1.10)
+    if (kontakData.pemilik_ids && Array.isArray(kontakData.pemilik_ids)) {
+      syncKontakPemilik(idKontak, kontakData.pemilik_ids);
+    } else if (kontakData.id_pemilik_aktif) {
+      syncKontakPemilik(idKontak, [kontakData.id_pemilik_aktif]);
+    }
+
     return { ok: true, data: { id: idKontak } };
   } catch (err) {
     return { ok: false, message: 'Gagal menyimpan kontak: ' + err.message };
@@ -398,6 +479,7 @@ function deleteKontak(id) {
       if (String(data[i][0]) === String(id)) {
         sheet.deleteRow(i + 1);
         removeKontakTags(id);
+        removeKontakAllPemilik(id);
         writeLog('HAPUS_KONTAK', id, 'Menghapus kontak');
         return { ok: true };
       }
@@ -408,7 +490,7 @@ function deleteKontak(id) {
   }
 }
 
-function importKontakCsv(csvString) {
+function importKontakCsv(csvString, idPemilik) {
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(15000);
@@ -417,14 +499,23 @@ function importKontakCsv(csvString) {
     var existingPhones = {};
     var data = sheet.getDataRange().getValues();
     for (var i = 1; i < data.length; i++) {
-      existingPhones[String(data[i][2])] = true;
+      existingPhones[String(data[i][2])] = String(data[i][0]);
+    }
+
+    var kpSheet = ss.getSheetByName('Kontak_Pemilik');
+    var kpData = kpSheet ? kpSheet.getDataRange().getValues() : [];
+    var existingPairs = {};
+    for (var p = 1; p < kpData.length; p++) {
+      existingPairs[String(kpData[p][0]) + '_' + String(kpData[p][1])] = true;
     }
 
     var lines = csvString.split('\n');
     var importedCount = 0;
+    var updatedOwnerCount = 0;
     var rejected = [];
     var now = new Date().toISOString();
     var rowsToAppend = [];
+    var kpRowsToAppend = [];
 
     lines.forEach(function(line, idx) {
       var trimmed = line.trim();
@@ -442,13 +533,19 @@ function importKontakCsv(csvString) {
         return;
       }
 
+      // Duplikat nomor lama: tambahkan nomor aktif sebagai pemilik (PRD v1.10)
       if (existingPhones[noHp]) {
-        rejected.push('Baris ' + (idx + 1) + ': Nomor ' + noHp + ' duplikat/sudah ada di database (AC-01).');
+        var existingCId = existingPhones[noHp];
+        if (idPemilik && !existingPairs[existingCId + '_' + idPemilik]) {
+          kpRowsToAppend.push([existingCId, idPemilik, now]);
+          existingPairs[existingCId + '_' + idPemilik] = true;
+          updatedOwnerCount++;
+        }
         return;
       }
 
-      existingPhones[noHp] = true;
       var id = 'ktk_' + Utilities.getUuid().substring(0, 8);
+      existingPhones[noHp] = id;
       rowsToAppend.push([
         id,
         nama,
@@ -462,18 +559,27 @@ function importKontakCsv(csvString) {
         '', '', '',
         now, now
       ]);
+      if (idPemilik) {
+        kpRowsToAppend.push([id, idPemilik, now]);
+        existingPairs[id + '_' + idPemilik] = true;
+      }
       importedCount++;
     });
 
     if (rowsToAppend.length > 0) {
       sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, rowsToAppend[0].length).setValues(rowsToAppend);
-      writeLog('IMPOR_CSV', 'SYSTEM', 'Berhasil mengimpor ' + importedCount + ' kontak.');
     }
+    if (kpRowsToAppend.length > 0 && kpSheet) {
+      kpSheet.getRange(kpSheet.getLastRow() + 1, 1, kpRowsToAppend.length, 3).setValues(kpRowsToAppend);
+    }
+
+    writeLog('IMPOR_CSV', 'SYSTEM', 'Impor CSV: ' + importedCount + ' kontak baru, ' + updatedOwnerCount + ' kontak lama ditambahkan pemilik.');
 
     return {
       ok: true,
       data: {
         imported: importedCount,
+        updatedOwner: updatedOwnerCount,
         rejected: rejected
       }
     };
@@ -993,18 +1099,23 @@ function toggleTemplateStatus(id) {
   }
 }
 
-function getSegmenList() {
+function getSegmenList(idPemilik) {
   try {
     var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     var sheet = ss.getSheetByName('Segmen');
     var data = sheet.getDataRange().getValues();
     var list = [];
     for (var i = 1; i < data.length; i++) {
+      var segOwnerId = data[i][4] !== undefined ? String(data[i][4]) : '';
+      if (idPemilik && segOwnerId && segOwnerId !== String(idPemilik)) {
+        continue;
+      }
       list.push({
         id: String(data[i][0]),
         nama: String(data[i][1]),
         kondisi_json: String(data[i][2]),
-        dibuat_pada: String(data[i][3])
+        dibuat_pada: String(data[i][3]),
+        id_pemilik: segOwnerId
       });
     }
     return { ok: true, data: serializeForClient(list) };
@@ -1033,14 +1144,22 @@ function saveSegmen(segmenData) {
     var id = isUpdate ? segmenData.id : ('seg_' + Utilities.getUuid().substring(0, 8));
     var now = new Date().toISOString();
     var kondisiStr = typeof segmenData.kondisi_json === 'object' ? JSON.stringify(segmenData.kondisi_json) : String(segmenData.kondisi_json || '{}');
+    var idPemilik = String(segmenData.id_pemilik || '');
+
+    if (sheet.getLastColumn() < 5 || String(sheet.getRange(1, 5).getValue()).trim() !== 'id_pemilik') {
+      sheet.getRange(1, 5).setValue('id_pemilik');
+    }
 
     if (isUpdate && targetRow > 0) {
       sheet.getRange(targetRow, 2, 1, 2).setValues([[segmenData.nama, kondisiStr]]);
+      if (idPemilik) {
+        sheet.getRange(targetRow, 5).setValue(idPemilik);
+      }
     } else {
-      sheet.appendRow([id, segmenData.nama, kondisiStr, now]);
+      sheet.appendRow([id, segmenData.nama, kondisiStr, now, idPemilik]);
     }
 
-    writeLog('SIMPAN_SEGMEN', id, 'Menyimpan segmen ' + segmenData.nama);
+    writeLog('SIMPAN_SEGMEN', id, 'Menyimpan segmen ' + segmenData.nama + ' (Pemilik: ' + idPemilik + ')');
     return { ok: true, data: { id: id } };
   } catch (err) {
     return { ok: false, message: 'Gagal menyimpan segmen: ' + err.message };
@@ -1116,6 +1235,138 @@ function isContactMatchSegment(kId, row, segKondisi, tagMap) {
 /**
  * BROADCAST ENGINE & PRE-FLIGHT (F-13 s/d F-24, AC-02, AC-09, AC-11)
  */
+function getTargetRecipientsPreview(filter, idPengirim) {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var kData = ss.getSheetByName('Kontak').getDataRange().getValues();
+    var senderMap = getSenderLabelMap();
+    var tagMap = getKontakTagMap();
+    var pemilikMap = getKontakPemilikMap();
+
+    var activeJobs = {};
+    var jData = ss.getSheetByName('Broadcast_Job').getDataRange().getValues();
+    for (var j = 1; j < jData.length; j++) {
+      if (String(jData[j][8]) === 'berjalan') {
+        activeJobs[String(jData[j][0])] = String(jData[j][3]);
+      }
+    }
+
+    var activeQueueMap = {};
+    var bData = ss.getSheetByName('Broadcast_Kirim').getDataRange().getValues();
+    for (var b = 1; b < bData.length; b++) {
+      var jId = String(bData[b][1]);
+      var st = String(bData[b][5]);
+      var cId = String(bData[b][2]);
+      if (activeJobs[jId] && (st === 'antre' || st === 'diproses')) {
+        activeQueueMap[cId] = activeJobs[jId];
+      }
+    }
+
+    var cooldownDays = Number(getSettingValue('cooldown_hari', 7));
+    var cooldownThresholdMs = new Date().getTime() - (cooldownDays * 24 * 60 * 60 * 1000);
+
+    var op = (filter && filter.operator) ? filter.operator : 'AND';
+    var fTag = (filter && filter.tag) ? String(filter.tag) : '';
+    var fTahap = (filter && filter.tahap) ? String(filter.tahap).toLowerCase() : '';
+    var fKota = (filter && filter.kota) ? String(filter.kota).toLowerCase() : '';
+    var fSumber = (filter && filter.sumber) ? String(filter.sumber).toLowerCase() : '';
+    var fOptOut = (filter && filter.optOut !== undefined && filter.optOut !== '') ? String(filter.optOut) : 'false';
+    var fSearch = (filter && filter.search) ? String(filter.search).toLowerCase() : '';
+
+    var list = [];
+    var activeSenderId = String(idPengirim || '');
+
+    for (var i = 1; i < kData.length; i++) {
+      var row = kData[i];
+      var kId = String(row[0]);
+      var owners = pemilikMap[kId] || [];
+
+      if (activeSenderId && owners.indexOf(activeSenderId) === -1) {
+        continue;
+      }
+
+      var nama = String(row[1]);
+      var noHp = String(row[2]);
+      var email = String(row[3]);
+      var kota = String(row[4]);
+      var sumber = String(row[5]);
+      var tahap = String(row[6]);
+      var isOptOut = !!row[7];
+
+      // Kriteria satuan
+      var conditions = [];
+      if (fTahap) conditions.push(tahap.toLowerCase() === fTahap);
+      if (fKota) conditions.push(kota.toLowerCase().indexOf(fKota) > -1);
+      if (fSumber) conditions.push(sumber.toLowerCase().indexOf(fSumber) > -1);
+      if (fOptOut !== '') {
+        conditions.push(fOptOut === 'true' ? isOptOut : !isOptOut);
+      }
+      if (fTag) {
+        var cTags = tagMap[kId] || [];
+        var hasT = cTags.some(function(t) { return t.id === fTag; });
+        conditions.push(hasT);
+      }
+      if (fSearch) {
+        var matchS = nama.toLowerCase().indexOf(fSearch) > -1 ||
+                     noHp.indexOf(fSearch) > -1 ||
+                     email.toLowerCase().indexOf(fSearch) > -1;
+        conditions.push(matchS);
+      }
+
+      var isMatch = true;
+      if (conditions.length > 0) {
+        isMatch = (op === 'OR') ? conditions.some(function(c) { return c; }) : conditions.every(function(c) { return c; });
+      }
+      if (!isMatch) continue;
+      if (isOptOut) continue; // Peringatan Perubahan 3: Opt-out tidak ditampilkan di daftar
+
+      var warning = '';
+      var isCooldown = false;
+      var inActive = false;
+
+      var lastSentStr = row[9];
+      var lastSenderId = String(row[10]);
+      if (lastSentStr) {
+        var lDate = new Date(lastSentStr);
+        if (!isNaN(lDate.getTime()) && lDate.getTime() > cooldownThresholdMs) {
+          isCooldown = true;
+          var tglFmt = Utilities.formatDate(lDate, 'Asia/Jakarta', 'yyyy-MM-dd HH:mm');
+          var pLabel = senderMap[lastSenderId] || lastSenderId || 'Pengirim';
+          warning = 'Kena cooldown: terakhir dikirim ' + tglFmt + ' dari ' + pLabel;
+        }
+      }
+
+      if (activeQueueMap[kId]) {
+        inActive = true;
+        warning = (warning ? warning + ' | ' : '') + 'Sudah di antrean job ' + activeQueueMap[kId];
+      }
+
+      list.push({
+        id: kId,
+        nama: nama,
+        no_hp: noHp,
+        kota: kota,
+        sumber: sumber,
+        tahap: tahap,
+        warning: warning,
+        is_cooldown: isCooldown,
+        in_active_job: inActive,
+        checked: true
+      });
+    }
+
+    return {
+      ok: true,
+      data: serializeForClient({
+        count: list.length,
+        items: list
+      })
+    };
+  } catch (err) {
+    return { ok: false, message: 'Gagal mengambil penerima: ' + err.message };
+  }
+}
+
 function calculateBroadcastPreflight(params) {
   try {
     var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -1126,6 +1377,9 @@ function calculateBroadcastPreflight(params) {
     var cooldownDays = Number(getSettingValue('cooldown_hari', 7));
     var nowMs = new Date().getTime();
     var cooldownThresholdMs = nowMs - (cooldownDays * 24 * 60 * 60 * 1000);
+
+    var pemilikMap = getKontakPemilikMap();
+    var activeSenderId = String(params && params.idPengirim ? params.idPengirim : '');
 
     var totalEligible = 0;
     var inCooldown = 0;
@@ -1141,6 +1395,13 @@ function calculateBroadcastPreflight(params) {
 
     for (var i = 1; i < kData.length; i++) {
       var kId = String(kData[i][0]);
+      var owners = pemilikMap[kId] || [];
+
+      // Filter: Hanya kontak milik nomor pengirim aktif (PRD v1.10)
+      if (activeSenderId && owners.indexOf(activeSenderId) === -1) {
+        continue;
+      }
+
       var isOptOut = !!kData[i][7];
       var lastSentStr = kData[i][9];
 
@@ -1242,6 +1503,8 @@ function createBroadcastJob(payload) {
     var kontakSheet = ss.getSheetByName('Kontak');
     var kData = kontakSheet.getDataRange().getValues();
     var activeContactIds = getActiveJobContactIds();
+    var pemilikMap = getKontakPemilikMap();
+    var senderId = String(payload.idPengirim);
     var cooldownDays = Number(getSettingValue('cooldown_hari', 7));
     var now = new Date();
     var cooldownThresholdMs = now.getTime() - (cooldownDays * 24 * 60 * 60 * 1000);
@@ -1269,30 +1532,48 @@ function createBroadcastJob(payload) {
     var jedaMin = Math.max(1, Math.min(60, parseInt(payload.jedaMin, 10) || 1));
     var jedaMax = Math.max(jedaMin, Math.min(60, parseInt(payload.jedaMax, 10) || 10));
 
+    var targetRecipientMap = null;
+    if (payload.selectedRecipients && Array.isArray(payload.selectedRecipients)) {
+      targetRecipientMap = {};
+      payload.selectedRecipients.forEach(function(item) {
+        targetRecipientMap[String(item.id_kontak)] = item;
+      });
+    }
+
     for (var i = 1; i < kData.length; i++) {
       var kId = String(kData[i][0]);
+      var owners = pemilikMap[kId] || [];
+
+      // Filter: Hanya kontak yang memiliki pemilik = nomor pengirim aktif (PRD v1.10)
+      if (senderId && owners.indexOf(senderId) === -1) {
+        continue;
+      }
+
+      // Perubahan 5: Hanya id_kontak yang tercentang di UI yang dibuatkan antrean
+      var recipientMeta = targetRecipientMap ? targetRecipientMap[kId] : null;
+      if (targetRecipientMap && !recipientMeta) {
+        continue;
+      }
+
       var nama = String(kData[i][1]);
       var noHp = String(kData[i][2]);
       var isOptOut = !!kData[i][7];
       var lastSentStr = kData[i][9];
 
-      // F-14 & AC-02: Kontak opt-out dilewati
+      // Kontak opt-out dilewati
       if (isOptOut) {
         skippedDueToOptOut++;
         continue;
       }
 
-      // F-19 & AC-09: Lewati jika di job aktif lain
-      if (activeContactIds[kId]) {
-        skippedDueToActive++;
-        continue;
-      }
-
-      // Cooldown check (F-20, AC-11)
-      if (!payload.overrideCooldown && lastSentStr) {
+      // Pengecekan cooldown per kontak (Perubahan 5)
+      if (lastSentStr) {
         var lastSentDate = new Date(lastSentStr);
         if (!isNaN(lastSentDate.getTime()) && lastSentDate.getTime() > cooldownThresholdMs) {
-          continue;
+          var lanjutCooldown = recipientMeta ? !!recipientMeta.lanjut_walau_cooldown : !!payload.overrideCooldown;
+          if (!lanjutCooldown) {
+            continue;
+          }
         }
       }
 
@@ -2168,6 +2449,128 @@ function getSenderLabelMap() {
 function getSenderLabelById(id) {
   var map = getSenderLabelMap();
   return map[id] || id;
+}
+
+/**
+ * KONTAK PEMILIK HELPERS (PRD v1.10)
+ */
+function getKontakPemilikMap() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var kpSheet = ss.getSheetByName('Kontak_Pemilik');
+  if (!kpSheet) return {};
+  var data = kpSheet.getDataRange().getValues();
+  var map = {};
+  for (var i = 1; i < data.length; i++) {
+    var cId = String(data[i][0]);
+    var pId = String(data[i][1]);
+    if (!map[cId]) map[cId] = [];
+    if (map[cId].indexOf(pId) === -1) {
+      map[cId].push(pId);
+    }
+  }
+  return map;
+}
+
+function syncKontakPemilik(contactId, ownerIds) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var kpSheet = ss.getSheetByName('Kontak_Pemilik');
+  if (!kpSheet) return;
+  var kpData = kpSheet.getDataRange().getValues();
+  for (var i = kpData.length - 1; i >= 1; i--) {
+    if (String(kpData[i][0]) === String(contactId)) {
+      kpSheet.deleteRow(i + 1);
+    }
+  }
+  if (!ownerIds || !ownerIds.length) return;
+  var uniqueOwners = {};
+  var rowsToAppend = [];
+  var nowIso = new Date().toISOString();
+  ownerIds.forEach(function(oid) {
+    var sOid = String(oid).trim();
+    if (sOid && !uniqueOwners[sOid]) {
+      uniqueOwners[sOid] = true;
+      rowsToAppend.push([contactId, sOid, nowIso]);
+    }
+  });
+  if (rowsToAppend.length > 0) {
+    kpSheet.getRange(kpSheet.getLastRow() + 1, 1, rowsToAppend.length, 3).setValues(rowsToAppend);
+  }
+}
+
+function removeKontakAllPemilik(contactId) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var kpSheet = ss.getSheetByName('Kontak_Pemilik');
+  if (!kpSheet) return;
+  var kpData = kpSheet.getDataRange().getValues();
+  for (var i = kpData.length - 1; i >= 1; i--) {
+    if (String(kpData[i][0]) === String(contactId)) {
+      kpSheet.deleteRow(i + 1);
+    }
+  }
+}
+
+function bulkAddKontakPemilik(contactIds, idPemilik) {
+  if (!contactIds || !contactIds.length || !idPemilik) {
+    return { ok: false, message: 'Kontak atau nomor pemilik belum dipilih.' };
+  }
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var kpSheet = ss.getSheetByName('Kontak_Pemilik');
+    var kpData = kpSheet.getDataRange().getValues();
+    var existingPairs = {};
+    for (var i = 1; i < kpData.length; i++) {
+      existingPairs[String(kpData[i][0]) + '_' + String(kpData[i][1])] = true;
+    }
+    var rowsToAppend = [];
+    var nowIso = new Date().toISOString();
+    for (var j = 0; j < contactIds.length; j++) {
+      var cId = String(contactIds[j]);
+      var key = cId + '_' + idPemilik;
+      if (!existingPairs[key]) {
+        rowsToAppend.push([cId, idPemilik, nowIso]);
+        existingPairs[key] = true;
+      }
+    }
+    if (rowsToAppend.length > 0) {
+      kpSheet.getRange(kpSheet.getLastRow() + 1, 1, rowsToAppend.length, 3).setValues(rowsToAppend);
+      writeLog('BULK_TAMBAH_PEMILIK', idPemilik, 'Menambah pemilik ke ' + rowsToAppend.length + ' kontak');
+    }
+    return { ok: true, count: rowsToAppend.length };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function bulkRemoveKontakPemilik(contactIds, idPemilik) {
+  if (!contactIds || !contactIds.length || !idPemilik) {
+    return { ok: false, message: 'Kontak atau nomor pemilik belum dipilih.' };
+  }
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var kpSheet = ss.getSheetByName('Kontak_Pemilik');
+    var kpData = kpSheet.getDataRange().getValues();
+    var idSet = {};
+    contactIds.forEach(function(id) { idSet[String(id)] = true; });
+    var removedCount = 0;
+    for (var i = kpData.length - 1; i >= 1; i--) {
+      if (idSet[String(kpData[i][0])] && String(kpData[i][1]) === String(idPemilik)) {
+        kpSheet.deleteRow(i + 1);
+        removedCount++;
+      }
+    }
+    writeLog('BULK_LEPAS_PEMILIK', idPemilik, 'Melepas pemilik dari ' + removedCount + ' kontak');
+    return { ok: true, count: removedCount };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function syncKontakTags(contactId, newTagIds) {
