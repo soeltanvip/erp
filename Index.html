@@ -1837,6 +1837,27 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
               self.showToast('Pengirim berhasil disimpan.');
               self.closeModal('modalPengirim');
               self.loadPengirim();
+          }).withFailureHandler(function(err) {
+            self.saving = false;
+            self.showToast('Error: ' + err.message, 'error');
+          }).savePengirim(self.formPengirim);
+        },
+
+        // TEMPLATE
+        loadTemplates: function() {
+          var self = this;
+=======
+        // TEMPLATE
+        loadTemplates: function() {
+          var self = this;
+          google.script.run.withSuccessHandler(function(res) {
+            if (res && res.ok) self.templateList = res.data;
+            self.$nextTick(function() { lucide.createIcons(); });
+          }).getTemplateList();
+        },
+
+        openModalTemplate: function(item) {
+=======
             } else {
               self.showToast(res ? res.message : 'Gagal simpan pengirim', 'error');
             }
@@ -1845,6 +1866,27 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
             self.showToast('Error: ' + err.message, 'error');
           }).savePengirim(self.formPengirim);
         },
+
+        // TEMPLATE
+        loadTemplates: function() {
+          var self = this;
+          google.script.run.withSuccessHandler(function(res) {
+            if (res && res.ok) self.templateList = res.data;
+            self.$nextTick(function() { lucide.createIcons(); });
+          }).getTemplateList();
+        },
+
+        openModalTemplate: function(item) {
+=======
+          }).withFailureHandler(function(err) {
+            self.saving = false;
+            self.showToast('Error: ' + err.message, 'error');
+          }).savePengirim(self.formPengirim);
+        },
+
+        // TEMPLATE
+        loadTemplates: function() {
+          var self = this;
 =======
         // TEMPLATE
         loadTemplates: function() {
