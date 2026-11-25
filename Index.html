@@ -603,7 +603,7 @@
                     <td class="py-3 px-4">
                       <span :class="'badge-' + j.status" class="px-2 py-0.5 rounded text-xs font-semibold capitalize" x-text="j.status"></span>
                     </td>
-                    <td class="py-3 px-4 text-xs font-mono" x-text="j.jeda_min + ' - ' + j.jeda_max + 's'"></td>
+                    <td class="py-3 px-4 text-xs font-mono" x-text="j.jeda_min + ' - ' + j.jeda_max + ' m'"></td>
                     <td class="py-3 px-4 text-xs text-gray-400" x-text="formatDate(j.dibuat_pada)"></td>
                     <td class="py-3 px-4 text-center">
                       <div class="inline-flex space-x-1">
@@ -624,6 +624,130 @@
               </tbody>
             </table>
           </div>
+        </div>
+      </section>
+
+      <!-- TAB: ANTREAN -->
+      <section x-show="currentTab === 'antrean'" x-cloak class="space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-bold text-gray-900">Monitor Antrean Kirim</h1>
+            <p class="text-sm text-gray-500">Pantau proses pengiriman pesan, waktu jadwal, dan status kegagalan per job.</p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button @click="loadJobQueue()" :disabled="!selectedAntreanJobId || loadingAntrean" class="inline-flex items-center space-x-2 text-sm bg-white border border-gray-300 px-3 py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50">
+              <i data-lucide="refresh-cw" class="w-4 h-4" :class="{'animate-spin': loadingAntrean}"></i>
+              <span>Segarkan</span>
+            </button>
+            <button x-show="antreanData && antreanData.job && antreanData.job.status === 'berjalan'" @click="confirmStopCurrentJob()" class="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-sm inline-flex items-center space-x-2">
+              <i data-lucide="stop-circle" class="w-4 h-4"></i>
+              <span>Hentikan Job Ini</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Pemilih Job Broadcast -->
+        <div class="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Pilih Job Broadcast</label>
+          <select x-model="selectedAntreanJobId" @change="loadJobQueue()" class="w-full sm:max-w-md p-2.5 text-sm border border-gray-300 rounded-lg">
+            <option value="">-- Pilih Job Broadcast --</option>
+            <template x-for="j in broadcastJobList" :key="j.id">
+              <option :value="j.id" x-text="j.nama + ' (' + j.status + ') - ' + j.jumlah_target + ' target'"></option>
+            </template>
+          </select>
+        </div>
+
+        <!-- Kartu Ringkasan & Per Kampanye -->
+        <template x-if="antreanData && antreanData.job">
+          <div class="space-y-4">
+            <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div class="text-sm font-medium text-blue-950">
+                <span class="font-bold">Ringkasan:</span>
+                Terkirim <span class="font-bold text-emerald-700" x-text="antreanData.counts.terkirim"></span> dari <span class="font-bold" x-text="antreanData.job.jumlah_target"></span>,
+                gagal <span class="font-bold text-red-700" x-text="antreanData.counts.gagal_permanen + antreanData.counts.gagal_pengirim_banned"></span>,
+                sisa antre <span class="font-bold text-amber-700" x-text="antreanData.counts.antre"></span>.
+              </div>
+              <span :class="'badge-' + antreanData.job.status" class="px-2.5 py-1 rounded text-xs font-bold uppercase self-start sm:self-auto" x-text="antreanData.job.status"></span>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center text-xs">
+              <div class="p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <div class="text-xl font-bold text-amber-600" x-text="antreanData.counts.antre"></div>
+                <div class="text-gray-500 font-medium">Antre</div>
+              </div>
+              <div class="p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <div class="text-xl font-bold text-blue-600" x-text="antreanData.counts.diproses"></div>
+                <div class="text-gray-500 font-medium">Diproses</div>
+              </div>
+              <div class="p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <div class="text-xl font-bold text-emerald-600" x-text="antreanData.counts.terkirim"></div>
+                <div class="text-gray-500 font-medium">Terkirim</div>
+              </div>
+              <div class="p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+                <div class="text-xl font-bold text-red-600" x-text="antreanData.counts.gagal_permanen"></div>
+                <div class="text-gray-500 font-medium">Gagal Permanen</div>
+              </div>
+              <div class="p-3 bg-white border border-gray-200 rounded-lg shadow-sm col-span-2 sm:col-span-1">
+                <div class="text-xl font-bold text-red-800" x-text="antreanData.counts.gagal_pengirim_banned"></div>
+                <div class="text-gray-500 font-medium">Pengirim Banned</div>
+              </div>
+            </div>
+
+            <!-- Sub Tab Navigasi Antrean -->
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+              <div class="flex border-b border-gray-200 px-4 bg-gray-50 text-xs font-semibold">
+                <button @click="activeAntreanTab = 'antre'" :class="activeAntreanTab === 'antre' ? 'border-b-2 border-blue-600 text-blue-600 bg-white' : 'text-gray-600 hover:text-gray-900'" class="px-4 py-3 -mb-px">
+                  Antre (<span x-text="antreanData.counts.antre"></span>)
+                </button>
+                <button @click="activeAntreanTab = 'diproses'" :class="activeAntreanTab === 'diproses' ? 'border-b-2 border-blue-600 text-blue-600 bg-white' : 'text-gray-600 hover:text-gray-900'" class="px-4 py-3 -mb-px">
+                  Diproses (<span x-text="antreanData.counts.diproses"></span>)
+                </button>
+                <button @click="activeAntreanTab = 'terkirim'" :class="activeAntreanTab === 'terkirim' ? 'border-b-2 border-blue-600 text-blue-600 bg-white' : 'text-gray-600 hover:text-gray-900'" class="px-4 py-3 -mb-px">
+                  Terkirim (<span x-text="antreanData.counts.terkirim"></span>)
+                </button>
+                <button @click="activeAntreanTab = 'gagal'" :class="activeAntreanTab === 'gagal' ? 'border-b-2 border-blue-600 text-blue-600 bg-white' : 'text-gray-600 hover:text-gray-900'" class="px-4 py-3 -mb-px">
+                  Gagal (<span x-text="antreanData.counts.total_gagal"></span>)
+                </button>
+              </div>
+
+              <!-- Tabel Tab Antrean -->
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs text-gray-600">
+                  <thead class="bg-gray-50 text-gray-700 uppercase border-b">
+                    <tr>
+                      <th class="py-2.5 px-3">No. HP</th>
+                      <th class="py-2.5 px-3">Waktu Kirim</th>
+                      <th class="py-2.5 px-3">Status</th>
+                      <th class="py-2.5 px-3">Alasan</th>
+                      <th class="py-2.5 px-3 text-center">Percobaan</th>
+                      <th class="py-2.5 px-3">Waktu Update</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-100">
+                    <template x-for="row in getFilteredAntreanRows()" :key="row.id">
+                      <tr class="hover:bg-gray-50">
+                        <td class="py-2.5 px-3 font-mono font-medium text-gray-800" x-text="row.no_hp"></td>
+                        <td class="py-2.5 px-3 font-mono text-gray-600 whitespace-nowrap" x-text="row.waktu_kirim || '-'"></td>
+                        <td class="py-2.5 px-3">
+                          <span :class="'badge-' + row.status" class="px-2 py-0.5 rounded text-[10px] font-semibold uppercase" x-text="row.status"></span>
+                        </td>
+                        <td class="py-2.5 px-3 text-gray-500 max-w-xs truncate" x-text="row.alasan || '-'"></td>
+                        <td class="py-2.5 px-3 text-center font-semibold" x-text="row.percobaan"></td>
+                        <td class="py-2.5 px-3 text-gray-400 whitespace-nowrap" x-text="row.waktu_update ? formatDate(row.waktu_update) : '-'"></td>
+                      </tr>
+                    </template>
+                    <tr x-show="getFilteredAntreanRows().length === 0">
+                      <td colspan="6" class="py-8 text-center text-gray-400">Tidak ada baris dalam kategori ini.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <div x-show="!selectedAntreanJobId" class="py-12 bg-white rounded-lg border border-gray-200 text-center text-sm text-gray-400">
+          Silakan pilih job broadcast di atas untuk melihat detail antrean kirim.
         </div>
       </section>
 
@@ -651,12 +775,12 @@
               </div>
               <div class="grid grid-cols-2 gap-3">
                 <div>
-                  <label class="block text-xs font-semibold text-gray-600 mb-1">Jeda Acak Minimum (Detik)</label>
-                  <input type="number" x-model="settings.jeda_default_min" class="w-full text-sm p-2 border rounded-lg">
+                  <label class="block text-xs font-semibold text-gray-600 mb-1">Jeda Acak Minimum (Menit)</label>
+                  <input type="number" min="1" max="60" x-model="settings.jeda_default_min" class="w-full text-sm p-2 border rounded-lg">
                 </div>
                 <div>
-                  <label class="block text-xs font-semibold text-gray-600 mb-1">Jeda Acak Maksimum (Detik)</label>
-                  <input type="number" x-model="settings.jeda_default_max" class="w-full text-sm p-2 border rounded-lg">
+                  <label class="block text-xs font-semibold text-gray-600 mb-1">Jeda Acak Maksimum (Menit)</label>
+                  <input type="number" min="1" max="60" x-model="settings.jeda_default_max" class="w-full text-sm p-2 border rounded-lg">
                 </div>
               </div>
               <div>
@@ -971,17 +1095,52 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
 
       <!-- STEP 4: JEDA & JADWAL (F-21) -->
       <div x-show="wizardStep === 4" class="space-y-4">
-        <h3 class="font-semibold text-gray-800 text-sm">Pengaturan Jeda Antar Pesan</h3>
-        <p class="text-xs text-gray-500">Sistem akan mengacak jeda antara nilai minimum dan maksimum sebelum mengirim pesan berikutnya.</p>
-        <div class="grid grid-cols-2 gap-4 max-w-md">
-          <div>
-            <label class="block text-xs font-semibold text-gray-600 mb-1">Jeda Min (Detik)</label>
-            <input type="number" min="1" max="60" x-model.number="wizardData.jedaMin" class="w-full p-2 border rounded-lg text-sm">
+        <div>
+          <h3 class="font-semibold text-gray-800 text-sm mb-2">Mulai Kirim</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md mb-3">
+            <label class="p-3 border rounded-lg cursor-pointer flex items-center space-x-3" :class="wizardData.modeJadwal === 'sekarang' ? 'border-blue-600 bg-blue-50' : ''">
+              <input type="radio" value="sekarang" x-model="wizardData.modeJadwal" class="text-blue-600">
+              <div>
+                <div class="font-semibold text-sm">Sekarang</div>
+                <div class="text-xs text-gray-500">Kirim segera saat dijalankan</div>
+              </div>
+            </label>
+            <label class="p-3 border rounded-lg cursor-pointer flex items-center space-x-3" :class="wizardData.modeJadwal === 'jadwal' ? 'border-blue-600 bg-blue-50' : ''">
+              <input type="radio" value="jadwal" x-model="wizardData.modeJadwal" class="text-blue-600">
+              <div>
+                <div class="font-semibold text-sm">Jadwal</div>
+                <div class="text-xs text-gray-500">Tentukan tanggal dan jam</div>
+              </div>
+            </label>
           </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-600 mb-1">Jeda Max (Detik)</label>
-            <input type="number" min="1" max="120" x-model.number="wizardData.jedaMax" class="w-full p-2 border rounded-lg text-sm">
+
+          <div x-show="wizardData.modeJadwal === 'jadwal'" class="p-3 bg-blue-50/50 border border-blue-200 rounded-lg max-w-md grid grid-cols-2 gap-3 mb-4">
+            <div>
+              <label class="block text-xs font-semibold text-gray-700 mb-1">Tanggal Kirim *</label>
+              <input type="date" x-model="wizardData.tglJadwal" class="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-700 mb-1">Jam (WIB) *</label>
+              <input type="time" x-model="wizardData.jamJadwal" class="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white">
+            </div>
+            <div class="col-span-2 text-[11px] text-gray-500">Zona waktu: Asia/Jakarta (WIB)</div>
           </div>
+        </div>
+
+        <div>
+          <h3 class="font-semibold text-gray-800 text-sm">Pengaturan Jeda Antar Pesan</h3>
+          <p class="text-xs text-gray-500 mb-2">Sistem akan mengacak jeda antara nilai minimum dan maksimum sebelum mengirim pesan berikutnya.</p>
+          <div class="grid grid-cols-2 gap-4 max-w-md">
+            <div>
+              <label class="block text-xs font-semibold text-gray-600 mb-1">Jeda Min (Menit)</label>
+              <input type="number" min="1" max="60" x-model.number="wizardData.jedaMin" class="w-full p-2 border rounded-lg text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-600 mb-1">Jeda Max (Menit)</label>
+              <input type="number" min="1" max="60" x-model.number="wizardData.jedaMax" class="w-full p-2 border rounded-lg text-sm">
+            </div>
+          </div>
+          <span class="text-[11px] text-gray-400 mt-1 block">Rentang 1 - 60 menit. Waktu di luar jam operasional otomatis dialihkan ke hari kerja berikutnya.</span>
         </div>
       </div>
 
@@ -1095,6 +1254,7 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           <thead class="bg-gray-50 text-gray-700 border-b">
             <tr>
               <th class="py-2 px-3">Kontak / No HP</th>
+              <th class="py-2 px-3">Waktu Kirim</th>
               <th class="py-2 px-3">Pesan</th>
               <th class="py-2 px-3">Status</th>
               <th class="py-2 px-3">Alasan / Catatan</th>
@@ -1104,6 +1264,7 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
             <template x-for="r in activeJobDetail.recipients" :key="r.id">
               <tr>
                 <td class="py-2 px-3 font-mono" x-text="r.no_hp"></td>
+                <td class="py-2 px-3 font-mono text-gray-500 whitespace-nowrap" x-text="r.waktu_kirim || '-'"></td>
                 <td class="py-2 px-3 max-w-[200px] truncate" x-text="r.isi_pesan"></td>
                 <td class="py-2 px-3">
                   <span :class="'badge-' + r.status" class="px-2 py-0.5 rounded text-[10px] font-semibold" x-text="r.status"></span>
@@ -1273,9 +1434,27 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
         <div>
           <div class="flex items-center justify-between mb-1">
             <label class="block text-xs font-semibold text-gray-600">Isi Pesan WhatsApp *</label>
-            <span class="text-[11px] text-gray-400">Variabel: {nama}, {kota}, {sumber}</span>
+            <span class="text-[11px] text-gray-400">Variabel: {nama}, {kota}, {sumber} | Spintax: {opsi1|opsi2}</span>
           </div>
-          <textarea x-model="formTemplate.isi_pesan" rows="6" class="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Halo {nama}, kami punya promo khusus untuk Anda di {kota}..."></textarea>
+          <textarea x-model="formTemplate.isi_pesan" rows="5" class="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm font-sans" placeholder="Halo {nama}, {kami ada|tersedia} promo {menarik|spesial} untuk Anda di {kota}..."></textarea>
+        </div>
+        <div>
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-gray-500">Uji variasi acak spintax:</span>
+            <button type="button" @click="previewSpintaxSamples()" class="text-xs text-blue-600 font-semibold hover:underline">
+              Pratinjau Variasi Acak
+            </button>
+          </div>
+          <template x-if="spintaxSamples.length > 0">
+            <div class="mt-2 space-y-1.5 p-2.5 bg-gray-50 rounded-lg border text-xs text-gray-700">
+              <template x-for="(sample, idx) in spintaxSamples" :key="idx">
+                <div class="p-1.5 bg-white rounded border border-gray-200">
+                  <span class="font-bold text-gray-400 mr-1" x-text="'#' + (idx + 1) + ':'"></span>
+                  <span x-text="sample"></span>
+                </div>
+              </template>
+            </div>
+          </template>
         </div>
       </div>
       <div class="flex justify-end space-x-2 pt-3 border-t">
@@ -1371,6 +1550,11 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
         loadingKontak: false,
         saving: false,
         loadingPreflight: false,
+        loadingAntrean: false,
+        selectedAntreanJobId: '',
+        antreanData: null,
+        activeAntreanTab: 'antre',
+        spintaxSamples: [],
 
         navItems: [
           { id: 'dashboard', label: 'Dashboard', icon: 'layout-dashboard', disabled: false },
@@ -1378,6 +1562,7 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           { id: 'tag', label: 'Tag & Aturan', icon: 'tag', disabled: false },
           { id: 'segmen', label: 'Segmen', icon: 'filter', disabled: false },
           { id: 'broadcast', label: 'Broadcast', icon: 'send', disabled: false },
+          { id: 'antrean', label: 'Antrean', icon: 'list-todo', disabled: false },
           { id: 'template', label: 'Template', icon: 'file-text', disabled: false },
           { id: 'pengirim', label: 'Pengirim', icon: 'smartphone', disabled: false },
           { id: 'pengaturan', label: 'Pengaturan', icon: 'settings', disabled: false },
@@ -1481,6 +1666,7 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           if (tabId === 'template') self.loadTemplates();
           if (tabId === 'pengirim') self.loadPengirim();
           if (tabId === 'broadcast') { self.loadBroadcastJobs(); self.loadPengirim(); self.loadTemplates(); }
+          if (tabId === 'antrean') { self.loadBroadcastJobs(); if (self.selectedAntreanJobId) self.loadJobQueue(); }
           if (tabId === 'pengaturan') { self.loadSettings(); self.loadLogs(); }
           self.$nextTick(function() { lucide.createIcons(); });
         },
@@ -1916,6 +2102,7 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
         },
 
         openModalTemplate: function(item) {
+          this.spintaxSamples = [];
           if (item) {
             this.formTemplate = {
               id: item.id,
@@ -1932,6 +2119,30 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
             };
           }
           this.openModal('modalTemplate');
+        },
+
+        previewSpintaxSamples: function() {
+          var text = this.formTemplate.isi_pesan || '';
+          if (!text.trim()) {
+            this.spintaxSamples = [];
+            return;
+          }
+          var samples = [];
+          for (var i = 0; i < 3; i++) {
+            var sample = text.replace(/\{([^{}]+)\}/g, function(match, inner) {
+              if (inner.indexOf('|') > -1) {
+                var choices = inner.split('|');
+                var picked = choices[Math.floor(Math.random() * choices.length)];
+                return picked.trim();
+              }
+              return match;
+            });
+            sample = sample.replace(/\{nama\}/g, 'Budi Santoso')
+                           .replace(/\{kota\}/g, 'Jakarta')
+                           .replace(/\{sumber\}/g, 'Instagram');
+            samples.push(sample);
+          }
+          this.spintaxSamples = samples;
         },
 
         saveTemplate: function() {
@@ -1977,8 +2188,11 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
             idPengirim: '',
             idTemplate: '',
             isiPesan: '',
-            jedaMin: this.settings.jeda_default_min || 1,
-            jedaMax: this.settings.jeda_default_max || 10,
+            modeJadwal: 'sekarang',
+            tglJadwal: '',
+            jamJadwal: '',
+            jedaMin: parseInt(this.settings.jeda_default_min, 10) || 1,
+            jedaMax: parseInt(this.settings.jeda_default_max, 10) || 10,
             tagTambahIds: [],
             tagHapusIds: [],
             namaJob: '',
@@ -2016,7 +2230,13 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
             return !!this.wizardData.idTemplate;
           }
           if (this.wizardStep === 4) {
-            return this.wizardData.jedaMin >= 1 && this.wizardData.jedaMax >= this.wizardData.jedaMin;
+            var min = parseInt(this.wizardData.jedaMin, 10);
+            var max = parseInt(this.wizardData.jedaMax, 10);
+            var validDelay = !isNaN(min) && !isNaN(max) && min >= 1 && min <= 60 && max >= min && max <= 60;
+            if (this.wizardData.modeJadwal === 'jadwal') {
+              return validDelay && !!this.wizardData.tglJadwal && !!this.wizardData.jamJadwal;
+            }
+            return validDelay;
           }
           if (this.wizardStep === 5) {
             return true;
@@ -2088,9 +2308,78 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
         loadBroadcastJobs: function() {
           var self = this;
           google.script.run.withSuccessHandler(function(res) {
-            if (res && res.ok) self.broadcastJobList = res.data;
+            if (res && res.ok) {
+              self.broadcastJobList = res.data;
+              if (!self.selectedAntreanJobId && res.data.length > 0) {
+                self.selectedAntreanJobId = res.data[0].id;
+              }
+            }
             self.$nextTick(function() { lucide.createIcons(); });
           }).getBroadcastJobList();
+        },
+
+        loadJobQueue: function() {
+          var self = this;
+          if (!self.selectedAntreanJobId) return;
+          self.loadingAntrean = true;
+          google.script.run.withSuccessHandler(function(res) {
+            self.loadingAntrean = false;
+            if (res && res.ok) {
+              self.antreanData = res.data;
+            } else {
+              self.showToast(res ? res.message : 'Gagal memuat antrean', 'error');
+            }
+            self.$nextTick(function() { lucide.createIcons(); });
+          }).withFailureHandler(function(err) {
+            self.loadingAntrean = false;
+            self.showToast('Error: ' + err.message, 'error');
+          }).getJobQueueData(self.selectedAntreanJobId);
+        },
+
+        getFilteredAntreanRows: function() {
+          if (!this.antreanData || !this.antreanData.rows) return [];
+          var tab = this.activeAntreanTab;
+          var rows = this.antreanData.rows.filter(function(r) {
+            if (tab === 'antre') return r.status === 'antre';
+            if (tab === 'diproses') return r.status === 'diproses';
+            if (tab === 'terkirim') return r.status === 'terkirim';
+            if (tab === 'gagal') return r.status.indexOf('gagal') === 0;
+            return true;
+          });
+
+          if (tab === 'antre') {
+            return rows.sort(function(a, b) {
+              return String(a.waktu_kirim || '').localeCompare(String(b.waktu_kirim || ''));
+            });
+          } else {
+            return rows.sort(function(a, b) {
+              return String(b.waktu_update || '').localeCompare(String(a.waktu_update || ''));
+            });
+          }
+        },
+
+        confirmStopCurrentJob: function() {
+          var self = this;
+          if (!self.antreanData || !self.antreanData.job) return;
+          var j = self.antreanData.job;
+
+          self.confirmDialog = {
+            title: 'Hentikan Job Ini?',
+            message: 'Job "' + j.nama + '" akan dihentikan. Semua baris yang masih berstatus antre akan diubah menjadi gagal permanen dengan alasan "dihentikan manual".',
+            isDanger: true,
+            callback: function() {
+              google.script.run.withSuccessHandler(function(res) {
+                if (res && res.ok) {
+                  self.showToast('Job berhasil dihentikan (' + res.data.stoppedCount + ' antrean dibatalkan).');
+                  self.loadJobQueue();
+                  self.loadBroadcastJobs();
+                } else {
+                  self.showToast(res ? res.message : 'Gagal menghentikan job', 'error');
+                }
+              }).stopBroadcastJob(j.id);
+            }
+          };
+          self.openModal('modalConfirm');
         },
 
         viewJobDetail: function(jobId) {
