@@ -526,6 +526,76 @@ function getTagAturanList() {
   }
 }
 
+function saveTag(tagData) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    if (!tagData.nama) return { ok: false, message: 'Nama tag wajib diisi.' };
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Tag');
+    var data = sheet.getDataRange().getValues();
+    var isUpdate = !!tagData.id;
+    var now = new Date().toISOString();
+
+    if (isUpdate) {
+      for (var i = 1; i < data.length; i++) {
+        if (String(data[i][0]) === String(tagData.id)) {
+          sheet.getRange(i + 1, 2, 1, 2).setValues([[tagData.nama, tagData.keterangan || '']]);
+          writeLog('UBAH_TAG', tagData.id, 'Mengubah tag: ' + tagData.nama);
+          return { ok: true, data: { id: tagData.id } };
+        }
+      }
+      return { ok: false, message: 'Tag tidak ditemukan.' };
+    } else {
+      var newId = 'tag_' + Utilities.getUuid().substring(0, 8);
+      sheet.appendRow([newId, tagData.nama, tagData.keterangan || '', now]);
+      writeLog('TAMBAH_TAG', newId, 'Menambah tag: ' + tagData.nama);
+      return { ok: true, data: { id: newId } };
+    }
+  } catch (err) {
+    return { ok: false, message: 'Gagal menyimpan tag: ' + err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function saveTagAturan(ruleData) {
+  try {
+    if (!ruleData.id_tag_pemicu || !ruleData.id_tag_target) {
+      return { ok: false, message: 'Tag pemicu dan tag target harus dipilih.' };
+    }
+    if (ruleData.id_tag_pemicu === ruleData.id_tag_target) {
+      return { ok: false, message: 'Tag pemicu dan tag target tidak boleh sama.' };
+    }
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Tag_Aturan');
+    var newId = 'rule_' + Utilities.getUuid().substring(0, 8);
+    sheet.appendRow([newId, ruleData.id_tag_pemicu, ruleData.aksi || 'hapus', ruleData.id_tag_target]);
+    writeLog('TAMBAH_ATURAN_TAG', newId, 'Menambah aturan tag');
+    return { ok: true, data: { id: newId } };
+  } catch (err) {
+    return { ok: false, message: 'Gagal menyimpan aturan: ' + err.message };
+  }
+}
+
+function deleteTagAturan(id) {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Tag_Aturan');
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        sheet.deleteRow(i + 1);
+        writeLog('HAPUS_ATURAN_TAG', id, 'Menghapus aturan tag');
+        return { ok: true };
+      }
+    }
+    return { ok: false, message: 'Aturan tidak ditemukan.' };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  }
+}
+
 function deleteTag(id) {
   try {
     var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -612,6 +682,108 @@ function addTagToContactDirect(contactId, tagId) {
 }
 
 /**
+ * SEGMEN MANAGEMENT (F-09)
+ */
+function getSegmenList() {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Segmen');
+    var data = sheet.getDataRange().getValues();
+    var list = [];
+    for (var i = 1; i < data.length; i++) {
+      list.push({
+        id: String(data[i][0]),
+        nama: String(data[i][1]),
+        kondisi_json: String(data[i][2]),
+        dibuat_pada: String(data[i][3])
+      });
+    }
+    return { ok: true, data: serializeForClient(list) };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  }
+}
+
+function saveSegmen(segmenData) {
+  try {
+    if (!segmenData.nama) return { ok: false, message: 'Nama segmen wajib diisi.' };
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Segmen');
+    var newId = 'seg_' + Utilities.getUuid().substring(0, 8);
+    var kondisiStr = typeof segmenData.kondisi === 'string'
+      ? segmenData.kondisi
+      : JSON.stringify(segmenData.kondisi || {});
+    var now = new Date().toISOString();
+    sheet.appendRow([newId, segmenData.nama, kondisiStr, now]);
+    writeLog('TAMBAH_SEGMEN', newId, 'Membuat segmen: ' + segmenData.nama);
+    return { ok: true, data: { id: newId } };
+  } catch (err) {
+    return { ok: false, message: 'Gagal menyimpan segmen: ' + err.message };
+  }
+}
+
+function deleteSegmen(id) {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Segmen');
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        sheet.deleteRow(i + 1);
+        writeLog('HAPUS_SEGMEN', id, 'Menghapus segmen');
+        return { ok: true };
+      }
+    }
+    return { ok: false, message: 'Segmen tidak ditemukan.' };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  }
+}
+
+function getSegmenFilterById(segmenId) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheet = ss.getSheetByName('Segmen');
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(segmenId)) {
+      try {
+        return JSON.parse(data[i][2]);
+      } catch (e) {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+function isContactMatchingSegmen(kRow, contactTags, filter) {
+  if (!filter) return true;
+  var op = filter.operator || 'AND';
+  var conditions = [];
+
+  if (filter.tahap) {
+    conditions.push(String(kRow[6]).toLowerCase() === String(filter.tahap).toLowerCase());
+  }
+  if (filter.tag) {
+    var hasTag = contactTags.some(function(t) { return t.id === filter.tag; });
+    conditions.push(hasTag);
+  }
+  if (filter.kota) {
+    conditions.push(String(kRow[4]).toLowerCase().indexOf(String(filter.kota).toLowerCase()) > -1);
+  }
+  if (filter.sumber) {
+    conditions.push(String(kRow[5]).toLowerCase().indexOf(String(filter.sumber).toLowerCase()) > -1);
+  }
+
+  if (conditions.length === 0) return true;
+
+  if (op === 'OR') {
+    return conditions.some(function(c) { return c; });
+  }
+  return conditions.every(function(c) { return c; });
+}
+
+/**
  * PENGIRIM MANAGEMENT (F-11, F-12, BR-07, BR-09)
  */
 function getPengirimList() {
@@ -677,6 +849,55 @@ function hentikanSemuaPengirim() {
   }
 }
 
+function savePengirim(pData) {
+  try {
+    if (!pData.label || !pData.no_hp) {
+      return { ok: false, message: 'Label dan nomor HP pengirim wajib diisi.' };
+    }
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Pengirim');
+    var data = sheet.getDataRange().getValues();
+    var normalizedPhone = normalizePhoneNumber(pData.no_hp);
+    var isUpdate = !!pData.id;
+    var todayStr = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyy-MM-dd');
+
+    if (isUpdate) {
+      for (var i = 1; i < data.length; i++) {
+        if (String(data[i][0]) === String(pData.id)) {
+          sheet.getRange(i + 1, 2, 1, 3).setValues([[
+            pData.label,
+            normalizedPhone,
+            pData.device_id || ''
+          ]]);
+          sheet.getRange(i + 1, 6).setValue(Number(pData.kuota_harian) || 50);
+          sheet.getRange(i + 1, 10).setValue(pData.catatan || '');
+          writeLog('UBAH_PENGIRIM', pData.id, 'Mengubah pengirim: ' + pData.label);
+          return { ok: true, data: { id: pData.id } };
+        }
+      }
+      return { ok: false, message: 'Pengirim tidak ditemukan.' };
+    } else {
+      var newId = 'snd_' + Utilities.getUuid().substring(0, 8);
+      sheet.appendRow([
+        newId,
+        pData.label,
+        normalizedPhone,
+        pData.device_id || ('dev_' + Utilities.getUuid().substring(0, 6)),
+        'aktif',
+        Number(pData.kuota_harian) || 50,
+        0,
+        todayStr,
+        '',
+        pData.catatan || ''
+      ]);
+      writeLog('TAMBAH_PENGIRIM', newId, 'Menambah pengirim baru: ' + pData.label);
+      return { ok: true, data: { id: newId } };
+    }
+  } catch (err) {
+    return { ok: false, message: 'Gagal menyimpan pengirim: ' + err.message };
+  }
+}
+
 /**
  * TEMPLATES (F-10)
  */
@@ -702,6 +923,79 @@ function getTemplateList() {
   }
 }
 
+function saveTemplate(tplData) {
+  try {
+    if (!tplData.nama || !tplData.isi_pesan) {
+      return { ok: false, message: 'Nama dan isi pesan template wajib diisi.' };
+    }
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Template');
+    var data = sheet.getDataRange().getValues();
+    var isUpdate = !!tplData.id;
+    var now = new Date().toISOString();
+
+    if (isUpdate) {
+      var jobSheet = ss.getSheetByName('Broadcast_Job');
+      var jobData = jobSheet.getDataRange().getValues();
+      var isUsed = false;
+      for (var j = 1; j < jobData.length; j++) {
+        if (String(jobData[j][4]) === String(tplData.id)) {
+          isUsed = true;
+          break;
+        }
+      }
+      if (isUsed) {
+        return { ok: false, message: 'Template yang sudah dipakai broadcast tidak dapat diedit isinya. Hanya dapat dinonaktifkan (F-10).' };
+      }
+
+      for (var i = 1; i < data.length; i++) {
+        if (String(data[i][0]) === String(tplData.id)) {
+          sheet.getRange(i + 1, 2, 1, 3).setValues([[
+            tplData.nama,
+            tplData.isi_pesan,
+            tplData.variabel || '{nama}, {kota}, {sumber}'
+          ]]);
+          writeLog('UBAH_TEMPLATE', tplData.id, 'Mengubah template: ' + tplData.nama);
+          return { ok: true, data: { id: tplData.id } };
+        }
+      }
+      return { ok: false, message: 'Template tidak ditemukan.' };
+    } else {
+      var newId = 'tpl_' + Utilities.getUuid().substring(0, 8);
+      sheet.appendRow([
+        newId,
+        tplData.nama,
+        tplData.isi_pesan,
+        tplData.variabel || '{nama}, {kota}, {sumber}',
+        true,
+        now
+      ]);
+      writeLog('TAMBAH_TEMPLATE', newId, 'Menambah template baru: ' + tplData.nama);
+      return { ok: true, data: { id: newId } };
+    }
+  } catch (err) {
+    return { ok: false, message: 'Gagal menyimpan template: ' + err.message };
+  }
+}
+
+function toggleTemplateStatus(id, newStatus) {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Template');
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        sheet.getRange(i + 1, 5).setValue(newStatus === true || newStatus === 'true');
+        writeLog('STATUS_TEMPLATE', id, 'Status template diubah ke ' + newStatus);
+        return { ok: true };
+      }
+    }
+    return { ok: false, message: 'Template tidak ditemukan.' };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  }
+}
+
 /**
  * BROADCAST ENGINE & PRE-FLIGHT (F-13 s/d F-24, AC-02, AC-09, AC-11)
  */
@@ -721,10 +1015,20 @@ function calculateBroadcastPreflight(params) {
     var inActiveJob = 0;
     var optedOut = 0;
 
+    var segmenFilter = null;
+    if (params && params.targetMode === 'segmen' && params.segmenId) {
+      segmenFilter = getSegmenFilterById(params.segmenId);
+    }
+    var tagMap = segmenFilter ? getKontakTagMap() : null;
+
     for (var i = 1; i < kData.length; i++) {
       var kId = String(kData[i][0]);
       var isOptOut = !!kData[i][7];
       var lastSentStr = kData[i][9];
+
+      if (segmenFilter && !isContactMatchingSegmen(kData[i], tagMap[kId] || [], segmenFilter)) {
+        continue;
+      }
 
       if (isOptOut) {
         optedOut++;
@@ -814,9 +1118,19 @@ function createBroadcastJob(payload) {
     var skippedDueToOptOut = 0;
     var skippedDueToActive = 0;
 
+    var segmenFilter = null;
+    if (payload && payload.targetMode === 'segmen' && payload.segmenId) {
+      segmenFilter = getSegmenFilterById(payload.segmenId);
+    }
+    var tagMap = segmenFilter ? getKontakTagMap() : null;
+
     for (var i = 1; i < kData.length; i++) {
       var kId = String(kData[i][0]);
       var nama = String(kData[i][1]);
+
+      if (segmenFilter && !isContactMatchingSegmen(kData[i], tagMap[kId] || [], segmenFilter)) {
+        continue;
+      }
       var noHp = String(kData[i][2]);
       var isOptOut = !!kData[i][7];
       var lastSentStr = kData[i][9];
