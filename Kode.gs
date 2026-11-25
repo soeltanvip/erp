@@ -157,7 +157,6 @@ function getDashboardData() {
   try {
     var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     checkAndResetDailyQuotas();
-    checkAndResetStalledClaims();
 
     var kontakSheet = ss.getSheetByName('Kontak');
     var kData = kontakSheet.getDataRange().getValues();
@@ -777,21 +776,60 @@ function savePengirim(pengirimData) {
 }
 
 function hentikanSemuaPengirim() {
+  var lock = LockService.getScriptLock();
   try {
+    lock.waitLock(15000);
     var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    var jobSheet = ss.getSheetByName('Broadcast_Job');
-    var data = jobSheet.getDataRange().getValues();
+
+    var pSheet = ss.getSheetByName('Pengirim');
+    var pRange = pSheet.getDataRange();
+    var pData = pRange.getValues();
+    var pChanged = false;
+    for (var i = 1; i < pData.length; i++) {
+      if (pData[i][4] !== 'nonaktif') {
+        pData[i][4] = 'nonaktif';
+        pChanged = true;
+      }
+    }
+    if (pChanged) pRange.setValues(pData);
+
+    var jSheet = ss.getSheetByName('Broadcast_Job');
+    var jRange = jSheet.getDataRange();
+    var jData = jRange.getValues();
+    var jChanged = false;
     var count = 0;
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][8]) === 'berjalan' || String(data[i][8]) === 'draft') {
-        jobSheet.getRange(i + 1, 9).setValue('dihentikan');
+    for (var j = 1; j < jData.length; j++) {
+      var jStatus = String(jData[j][8]);
+      if (jStatus === 'berjalan' || jStatus === 'draft') {
+        jData[j][8] = 'dihentikan';
+        jChanged = true;
         count++;
       }
     }
-    writeLog('HENTIKAN_SEMUA', 'SYSTEM', 'Menghentikan darurat ' + count + ' broadcast job.');
+    if (jChanged) jRange.setValues(jData);
+
+    var kSheet = ss.getSheetByName('Broadcast_Kirim');
+    var kRange = kSheet.getDataRange();
+    var kData = kRange.getValues();
+    var kChanged = false;
+    var nowIso = new Date().toISOString();
+    for (var k = 1; k < kData.length; k++) {
+      var kStatus = String(kData[k][5]);
+      if (kStatus === 'antre' || kStatus === 'diproses') {
+        kData[k][5] = 'gagal_pengirim_banned';
+        kData[k][6] = 'Dihentikan darurat';
+        kData[k][10] = nowIso;
+        kChanged = true;
+      }
+    }
+    if (kChanged) kRange.setValues(kData);
+
+    writeLog('HENTIKAN_SEMUA', 'SYSTEM', 'Menghentikan darurat semua pengirim dan ' + count + ' job.');
     return { ok: true, count: count };
   } catch (err) {
     return { ok: false, message: err.message };
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -1389,98 +1427,175 @@ function getBroadcastJobDetail(jobId) {
  * ATOMIC QUEUE CLAIM FOR N8N (BR-10, US-4.1, US-4.2)
  */
 function claimQueueItems(idJob, limit) {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  var kirimSheet = ss.getSheetByName('Broadcast_Kirim');
-  var data = kirimSheet.getDataRange().getValues();
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+    checkAndResetStalledClaims();
 
-  var claimed = [];
-  var claimId = 'claim_' + Utilities.getUuid().substring(0, 8);
-  var now = new Date().toISOString();
-  limit = limit || 10;
-
-  for (var i = 1; i < data.length && claimed.length < limit; i++) {
-    if (String(data[i][1]) === String(idJob) && String(data[i][5]) === 'antre') {
-      var rowIdx = i + 1;
-      kirimSheet.getRange(rowIdx, 6).setValue('diproses');
-      kirimSheet.getRange(rowIdx, 8).setValue(claimId);
-      kirimSheet.getRange(rowIdx, 9).setValue(now);
-      kirimSheet.getRange(rowIdx, 10).setValue((Number(data[i][9]) || 0) + 1);
-
-      claimed.push({
-        id_kirim: String(data[i][0]),
-        id_kontak: String(data[i][2]),
-        no_hp: String(data[i][3]),
-        isi_pesan: String(data[i][4]),
-        id_klaim: claimId
-      });
+    var jamMulai = String(getSettingValue('jam_kirim_mulai', '08:00')).trim();
+    var jamSelesai = String(getSettingValue('jam_kirim_selesai', '21:00')).trim();
+    if (jamMulai.length === 4) jamMulai = '0' + jamMulai;
+    if (jamSelesai.length === 4) jamSelesai = '0' + jamSelesai;
+    var nowTime = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'HH:mm');
+    if (nowTime < jamMulai || nowTime > jamSelesai) {
+      return { ok: true, data: { claim_id: '', claimed_count: 0, items: [], alasan: 'di_luar_jam_kirim' } };
     }
+
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var jobSheet = ss.getSheetByName('Broadcast_Job');
+    var jData = jobSheet.getDataRange().getValues();
+    var jobRow = null;
+    for (var j = 1; j < jData.length; j++) {
+      if (String(jData[j][0]) === String(idJob)) {
+        jobRow = jData[j];
+        break;
+      }
+    }
+
+    if (!jobRow || String(jobRow[8]) !== 'berjalan') {
+      return { ok: true, data: { claim_id: '', claimed_count: 0, items: [], alasan: 'job_tidak_berjalan' } };
+    }
+
+    var senderId = String(jobRow[5]);
+    var jedaMin = Number(jobRow[6]) || 1;
+    var jedaMax = Number(jobRow[7]) || 10;
+
+    var pSheet = ss.getSheetByName('Pengirim');
+    var pData = pSheet.getDataRange().getValues();
+    var senderRow = null;
+    for (var p = 1; p < pData.length; p++) {
+      if (String(pData[p][0]) === senderId) {
+        senderRow = pData[p];
+        break;
+      }
+    }
+
+    if (!senderRow || String(senderRow[4]) !== 'aktif') {
+      return { ok: true, data: { claim_id: '', claimed_count: 0, items: [], alasan: 'pengirim_tidak_aktif' } };
+    }
+
+    var kuotaHarian = Number(senderRow[5]) || 0;
+    var terpakaiHariIni = Number(senderRow[6]) || 0;
+    var sisaKuota = kuotaHarian - terpakaiHariIni;
+    if (kuotaHarian > 0 && sisaKuota <= 0) {
+      return { ok: true, data: { claim_id: '', claimed_count: 0, items: [], alasan: 'kuota_habis' } };
+    }
+
+    var kirimSheet = ss.getSheetByName('Broadcast_Kirim');
+    var kRange = kirimSheet.getDataRange();
+    var kData = kRange.getValues();
+    var claimed = [];
+    var claimId = 'claim_' + Utilities.getUuid().substring(0, 8);
+    var nowIso = new Date().toISOString();
+    var maxClaim = kuotaHarian > 0 ? Math.min(limit || 10, sisaKuota) : (limit || 10);
+
+    for (var i = 1; i < kData.length && claimed.length < maxClaim; i++) {
+      if (String(kData[i][1]) === String(idJob) && String(kData[i][5]) === 'antre') {
+        kData[i][5] = 'diproses';
+        kData[i][7] = claimId;
+        kData[i][8] = nowIso;
+        kData[i][9] = (Number(kData[i][9]) || 0) + 1;
+
+        claimed.push({
+          id_kirim: String(kData[i][0]),
+          id_kontak: String(kData[i][2]),
+          no_hp: String(kData[i][3]),
+          isi_pesan: String(kData[i][4]),
+          id_klaim: claimId
+        });
+      }
+    }
+
+    if (claimed.length === 0) {
+      return { ok: true, data: { claim_id: '', claimed_count: 0, items: [], alasan: 'kosong' } };
+    }
+
+    kRange.setValues(kData);
+
+    return {
+      ok: true,
+      data: {
+        claim_id: claimId,
+        claimed_count: claimed.length,
+        jeda_min: jedaMin,
+        jeda_max: jedaMax,
+        sender_id: senderId,
+        items: claimed,
+        alasan: null
+      }
+    };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  } finally {
+    lock.releaseLock();
   }
-
-  // Ambil detail jeda dan device
-  var jobSheet = ss.getSheetByName('Broadcast_Job');
-  var jData = jobSheet.getDataRange().getValues();
-  var jedaMin = 1, jedaMax = 10, senderId = '';
-
-  for (var j = 1; j < jData.length; j++) {
-    if (String(jData[j][0]) === String(idJob)) {
-      jedaMin = Number(jData[j][6]);
-      jedaMax = Number(jData[j][7]);
-      senderId = String(jData[j][5]);
-      break;
-    }
-  }
-
-  return {
-    ok: true,
-    data: {
-      claim_id: claimId,
-      claimed_count: claimed.length,
-      jeda_min: jedaMin,
-      jeda_max: jedaMax,
-      sender_id: senderId,
-      items: claimed
-    }
-  };
 }
 
 /**
  * REPORT SEND RESULT FROM N8N (BR-02, BR-11, AC-03)
  */
 function reportSendResult(payload) {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  var kirimSheet = ss.getSheetByName('Broadcast_Kirim');
-  var data = kirimSheet.getDataRange().getValues();
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var kirimSheet = ss.getSheetByName('Broadcast_Kirim');
+    var kRange = kirimSheet.getDataRange();
+    var kData = kRange.getValues();
 
-  var rowFound = -1;
-  var jobRowId = '';
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === String(payload.id_kirim) || (String(data[i][1]) === String(payload.id_job) && String(data[i][2]) === String(payload.id_kontak))) {
-      rowFound = i + 1;
-      jobRowId = String(data[i][1]);
-      break;
+    var rowFoundIdx = -1;
+    for (var i = 1; i < kData.length; i++) {
+      if (String(kData[i][0]) === String(payload.id_kirim)) {
+        rowFoundIdx = i;
+        break;
+      }
     }
-  }
 
-  if (rowFound > 0) {
-    var status = payload.status; // 'terkirim' | 'gagal_permanen' | 'gagal_pengirim_banned'
+    if (rowFoundIdx === -1) {
+      return { ok: false, message: 'Baris kirim tidak ditemukan' };
+    }
+
+    var rowKirim = kData[rowFoundIdx];
+    if (String(rowKirim[7]) !== String(payload.id_klaim)) {
+      return { ok: false, message: 'klaim tidak cocok' };
+    }
+
+    var idJob = String(rowKirim[1]);
+    var idKontak = String(rowKirim[2]);
+
+    var jobSheet = ss.getSheetByName('Broadcast_Job');
+    var jData = jobSheet.getDataRange().getValues();
+    var kampanyeId = '';
+    var idPengirim = '';
+    for (var j = 1; j < jData.length; j++) {
+      if (String(jData[j][0]) === idJob) {
+        kampanyeId = String(jData[j][1]);
+        idPengirim = String(jData[j][5]);
+        break;
+      }
+    }
+
+    var status = payload.status;
     var nowStr = new Date().toISOString();
-    kirimSheet.getRange(rowFound, 6).setValue(status);
-    kirimSheet.getRange(rowFound, 7).setValue(payload.alasan || '');
-    kirimSheet.getRange(rowFound, 11).setValue(nowStr);
+
+    rowKirim[5] = status;
+    rowKirim[6] = payload.alasan || '';
+    rowKirim[10] = nowStr;
+
+    kRange.setValues(kData);
 
     if (status === 'terkirim') {
-      // 1. Perbarui ringkasan di sheet Kontak (BR-11)
-      updateKontakSendSummary(payload.id_kontak, nowStr, payload.id_pengirim, payload.kampanye_id);
-      
-      // 2. Tambah kuota terpakai pengirim
-      incrementPengirimQuota(payload.id_pengirim);
-
-      // 3. Jalankan aksi tag job (BR-03, F-22)
-      executeJobTagActions(jobRowId, payload.id_kontak);
+      updateKontakSendSummary(idKontak, nowStr, idPengirim, kampanyeId);
+      incrementPengirimQuota(idPengirim);
+      executeJobTagActions(idJob, idKontak);
     }
-  }
 
-  return { ok: true };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
@@ -1568,24 +1683,44 @@ function checkAndResetStalledClaims() {
  * QUOTA RESET (BR-09: Asia/Jakarta Midnight)
  */
 function checkAndResetDailyQuotas() {
+  var lock = LockService.getScriptLock();
   try {
+    lock.waitLock(10000);
     var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     var sheet = ss.getSheetByName('Pengirim');
-    var data = sheet.getDataRange().getValues();
+    var range = sheet.getDataRange();
+    var data = range.getValues();
+    if (data.length <= 1) return;
+
     var todayStr = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyy-MM-dd');
+    var changed = false;
 
     for (var i = 1; i < data.length; i++) {
-      var resetDate = data[i][7] ? String(data[i][7]).substring(0, 10) : '';
-      if (resetDate !== todayStr) {
-        sheet.getRange(i + 1, 7).setValue(0); // reset terpakai
-        sheet.getRange(i + 1, 8).setValue(todayStr);
-        if (String(data[i][4]) === 'limit') {
-          sheet.getRange(i + 1, 5).setValue('aktif');
-        }
+      var cellVal = data[i][7];
+      var resetDateStr = '';
+      if (cellVal instanceof Date) {
+        resetDateStr = Utilities.formatDate(cellVal, 'Asia/Jakarta', 'yyyy-MM-dd');
+      } else if (cellVal) {
+        resetDateStr = String(cellVal).trim().substring(0, 10);
       }
+
+      if (resetDateStr !== todayStr) {
+        data[i][6] = 0;
+        data[i][7] = todayStr;
+        if (String(data[i][4]) === 'limit') {
+          data[i][4] = 'aktif';
+        }
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      range.setValues(data);
     }
   } catch (e) {
     // ignore
+  } finally {
+    lock.releaseLock();
   }
 }
 
