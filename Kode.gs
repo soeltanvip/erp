@@ -552,6 +552,76 @@ function deleteTag(id) {
   }
 }
 
+function saveTag(tagData) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Tag');
+    var data = sheet.getDataRange().getValues();
+    var isUpdate = !!tagData.id;
+    var targetRow = -1;
+    for (var i = 1; i < data.length; i++) {
+      if (isUpdate && String(data[i][0]) === String(tagData.id)) {
+        targetRow = i + 1;
+        break;
+      }
+    }
+    var now = new Date().toISOString();
+    var id = isUpdate ? tagData.id : ('tag_' + Utilities.getUuid().substring(0, 8));
+    if (isUpdate && targetRow > 0) {
+      sheet.getRange(targetRow, 2, 1, 2).setValues([[tagData.nama, tagData.keterangan || '']]);
+    } else {
+      sheet.appendRow([id, tagData.nama, tagData.keterangan || '', now]);
+    }
+    writeLog('SIMPAN_TAG', id, 'Menyimpan tag ' + tagData.nama);
+    return { ok: true, data: { id: id } };
+  } catch (err) {
+    return { ok: false, message: 'Gagal menyimpan tag: ' + err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function saveTagAturan(aturanData) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Tag_Aturan');
+    var id = aturanData.id || ('rule_' + Utilities.getUuid().substring(0, 8));
+    sheet.appendRow([id, aturanData.id_tag_pemicu, aturanData.aksi || 'hapus', aturanData.id_tag_target]);
+    writeLog('SIMPAN_ATURAN_TAG', id, 'Menambah aturan tag');
+    return { ok: true, data: { id: id } };
+  } catch (err) {
+    return { ok: false, message: 'Gagal menyimpan aturan tag: ' + err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function deleteTagAturan(id) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Tag_Aturan');
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        sheet.deleteRow(i + 1);
+        writeLog('HAPUS_ATURAN_TAG', id, 'Menghapus aturan tag');
+        return { ok: true };
+      }
+    }
+    return { ok: false, message: 'Aturan tag tidak ditemukan.' };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /**
  * Non-cascading Tag Rule Execution (AC-05, BR-03)
  */
@@ -658,6 +728,54 @@ function updatePengirimStatus(id, newStatus) {
   }
 }
 
+function savePengirim(pengirimData) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Pengirim');
+    var data = sheet.getDataRange().getValues();
+    var isUpdate = !!pengirimData.id;
+    var targetRow = -1;
+    var normalizedPhone = normalizePhoneNumber(pengirimData.no_hp);
+
+    for (var i = 1; i < data.length; i++) {
+      if (isUpdate && String(data[i][0]) === String(pengirimData.id)) {
+        targetRow = i + 1;
+        break;
+      }
+    }
+
+    var todayStr = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyy-MM-dd');
+    var id = isUpdate ? pengirimData.id : ('p_' + Utilities.getUuid().substring(0, 8));
+
+    if (isUpdate && targetRow > 0) {
+      sheet.getRange(targetRow, 2, 1, 3).setValues([[pengirimData.label, normalizedPhone, pengirimData.device_id || '']]);
+      sheet.getRange(targetRow, 6).setValue(Number(pengirimData.kuota_harian) || 50);
+      sheet.getRange(targetRow, 10).setValue(pengirimData.catatan || '');
+    } else {
+      sheet.appendRow([
+        id,
+        pengirimData.label,
+        normalizedPhone,
+        pengirimData.device_id || '',
+        'aktif',
+        Number(pengirimData.kuota_harian) || 50,
+        0,
+        todayStr,
+        '',
+        pengirimData.catatan || ''
+      ]);
+    }
+    writeLog('SIMPAN_PENGIRIM', id, 'Menyimpan nomor pengirim ' + pengirimData.label);
+    return { ok: true, data: { id: id } };
+  } catch (err) {
+    return { ok: false, message: 'Gagal menyimpan pengirim: ' + err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function hentikanSemuaPengirim() {
   try {
     var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -702,6 +820,188 @@ function getTemplateList() {
   }
 }
 
+function saveTemplate(templateData) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Template');
+    var data = sheet.getDataRange().getValues();
+    var isUpdate = !!templateData.id;
+    var targetRow = -1;
+    for (var i = 1; i < data.length; i++) {
+      if (isUpdate && String(data[i][0]) === String(templateData.id)) {
+        targetRow = i + 1;
+        break;
+      }
+    }
+    var now = new Date().toISOString();
+    var id = isUpdate ? templateData.id : ('tpl_' + Utilities.getUuid().substring(0, 8));
+    if (isUpdate && targetRow > 0) {
+      sheet.getRange(targetRow, 2, 1, 3).setValues([[
+        templateData.nama,
+        templateData.isi_pesan,
+        templateData.variabel || '{nama}, {kota}, {sumber}'
+      ]]);
+    } else {
+      sheet.appendRow([
+        id,
+        templateData.nama,
+        templateData.isi_pesan,
+        templateData.variabel || '{nama}, {kota}, {sumber}',
+        true,
+        now
+      ]);
+    }
+    writeLog('SIMPAN_TEMPLATE', id, 'Menyimpan template ' + templateData.nama);
+    return { ok: true, data: { id: id } };
+  } catch (err) {
+    return { ok: false, message: 'Gagal menyimpan template: ' + err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function toggleTemplateStatus(id) {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Template');
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        var current = !!data[i][4];
+        var next = !current;
+        sheet.getRange(i + 1, 5).setValue(next);
+        writeLog('STATUS_TEMPLATE', id, 'Ubah status template ke ' + (next ? 'aktif' : 'nonaktif'));
+        return { ok: true, data: { aktif: next } };
+      }
+    }
+    return { ok: false, message: 'Template tidak ditemukan.' };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  }
+}
+
+function getSegmenList() {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Segmen');
+    var data = sheet.getDataRange().getValues();
+    var list = [];
+    for (var i = 1; i < data.length; i++) {
+      list.push({
+        id: String(data[i][0]),
+        nama: String(data[i][1]),
+        kondisi_json: String(data[i][2]),
+        dibuat_pada: String(data[i][3])
+      });
+    }
+    return { ok: true, data: serializeForClient(list) };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  }
+}
+
+function saveSegmen(segmenData) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Segmen');
+    var data = sheet.getDataRange().getValues();
+    var isUpdate = !!segmenData.id;
+    var targetRow = -1;
+
+    for (var i = 1; i < data.length; i++) {
+      if (isUpdate && String(data[i][0]) === String(segmenData.id)) {
+        targetRow = i + 1;
+        break;
+      }
+    }
+
+    var id = isUpdate ? segmenData.id : ('seg_' + Utilities.getUuid().substring(0, 8));
+    var now = new Date().toISOString();
+    var kondisiStr = typeof segmenData.kondisi_json === 'object' ? JSON.stringify(segmenData.kondisi_json) : String(segmenData.kondisi_json || '{}');
+
+    if (isUpdate && targetRow > 0) {
+      sheet.getRange(targetRow, 2, 1, 2).setValues([[segmenData.nama, kondisiStr]]);
+    } else {
+      sheet.appendRow([id, segmenData.nama, kondisiStr, now]);
+    }
+
+    writeLog('SIMPAN_SEGMEN', id, 'Menyimpan segmen ' + segmenData.nama);
+    return { ok: true, data: { id: id } };
+  } catch (err) {
+    return { ok: false, message: 'Gagal menyimpan segmen: ' + err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function deleteSegmen(id) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Segmen');
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(id)) {
+        sheet.deleteRow(i + 1);
+        writeLog('HAPUS_SEGMEN', id, 'Menghapus segmen');
+        return { ok: true };
+      }
+    }
+    return { ok: false, message: 'Segmen tidak ditemukan.' };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getSegmentConditionById(segId) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sSheet = ss.getSheetByName('Segmen');
+  var data = sSheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(segId)) {
+      try {
+        return JSON.parse(data[i][2]);
+      } catch (e) {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+function isContactMatchSegment(kId, row, segKondisi, tagMap) {
+  if (!segKondisi) return true;
+  var op = segKondisi.operator || 'AND';
+  var matches = [];
+  if (segKondisi.tahap) {
+    matches.push(String(row[6] || '').toLowerCase() === String(segKondisi.tahap).toLowerCase());
+  }
+  if (segKondisi.kota) {
+    matches.push(String(row[4] || '').toLowerCase().indexOf(String(segKondisi.kota).toLowerCase()) > -1);
+  }
+  if (segKondisi.sumber) {
+    matches.push(String(row[5] || '').toLowerCase().indexOf(String(segKondisi.sumber).toLowerCase()) > -1);
+  }
+  if (segKondisi.tag) {
+    var cTags = tagMap[kId] || [];
+    var has = cTags.some(function(t) { return t.id === segKondisi.tag; });
+    matches.push(has);
+  }
+  if (matches.length === 0) return true;
+  if (op === 'OR') {
+    return matches.some(function(m) { return m; });
+  } else {
+    return matches.every(function(m) { return m; });
+  }
+}
+
 /**
  * BROADCAST ENGINE & PRE-FLIGHT (F-13 s/d F-24, AC-02, AC-09, AC-11)
  */
@@ -721,10 +1021,21 @@ function calculateBroadcastPreflight(params) {
     var inActiveJob = 0;
     var optedOut = 0;
 
+    var segmentFilter = null;
+    var tagMap = {};
+    if (params && params.targetMode === 'segmen' && params.segmenId) {
+      segmentFilter = getSegmentConditionById(params.segmenId);
+      tagMap = getKontakTagMap();
+    }
+
     for (var i = 1; i < kData.length; i++) {
       var kId = String(kData[i][0]);
       var isOptOut = !!kData[i][7];
       var lastSentStr = kData[i][9];
+
+      if (segmentFilter && !isContactMatchSegment(kId, kData[i], segmentFilter, tagMap)) {
+        continue;
+      }
 
       if (isOptOut) {
         optedOut++;

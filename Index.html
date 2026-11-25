@@ -343,7 +343,7 @@
             <h1 class="text-2xl font-bold text-gray-900">Tag & Aturan Otomatis</h1>
             <p class="text-sm text-gray-500">Kelola label pelanggan dan otomasi perubahan tag non-berantai (F-08).</p>
           </div>
-          <button @click="openModal('modalTag')" class="btn-primary text-sm px-4 py-2 rounded-lg font-medium inline-flex items-center space-x-2">
+          <button @click="openModalTag()" class="btn-primary text-sm px-4 py-2 rounded-lg font-medium inline-flex items-center space-x-2">
             <i data-lucide="tag" class="w-4 h-4"></i>
             <span>Tambah Tag</span>
           </button>
@@ -378,7 +378,7 @@
                 <h2 class="text-base font-semibold text-gray-800">Aturan Aksi Tag</h2>
                 <p class="text-xs text-gray-500">Contoh: Saat 'Tertarik' ditambah, 'Dingin' otomatis dihapus.</p>
               </div>
-              <button @click="openModal('modalAturanTag')" class="text-xs border border-blue-600 text-blue-600 px-2.5 py-1.5 rounded-lg hover:bg-blue-50 font-medium">
+              <button @click="openModalAturanTag()" class="text-xs border border-blue-600 text-blue-600 px-2.5 py-1.5 rounded-lg hover:bg-blue-50 font-medium">
                 + Buat Aturan
               </button>
             </div>
@@ -412,7 +412,7 @@
             <h1 class="text-2xl font-bold text-gray-900">Segmen Kontak</h1>
             <p class="text-sm text-gray-500">Kombinasi kondisi filter kontak untuk audiens broadcast yang terarah.</p>
           </div>
-          <button @click="openModal('modalSegmen')" class="btn-primary text-sm px-4 py-2 rounded-lg font-medium inline-flex items-center space-x-2">
+          <button @click="openModalSegmen()" class="btn-primary text-sm px-4 py-2 rounded-lg font-medium inline-flex items-center space-x-2">
             <i data-lucide="filter" class="w-4 h-4"></i>
             <span>Buat Segmen Baru</span>
           </button>
@@ -428,7 +428,7 @@
                     <i data-lucide="trash-2" class="w-4 h-4"></i>
                   </button>
                 </div>
-                <div class="mt-2 text-xs text-gray-500 font-mono bg-gray-50 p-2 rounded border border-gray-100 overflow-x-auto" x-text="s.kondisi_json"></div>
+                <div class="mt-2 text-xs text-gray-600 bg-gray-50 p-2 rounded border border-gray-100" x-text="formatKondisi(s.kondisi_json)"></div>
               </div>
               <div class="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
                 <span x-text="formatDate(s.dibuat_pada)"></span>
@@ -436,6 +436,9 @@
               </div>
             </div>
           </template>
+          <div x-show="segmenList.length === 0" class="col-span-full py-12 text-center text-sm text-gray-400">
+            Belum ada segmen tersimpan.
+          </div>
         </div>
       </section>
 
@@ -1095,6 +1098,213 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
     </div>
   </div>
 
+  <!-- MODAL: TAG TAMBAH / UBAH -->
+  <div x-show="modals.modalTag" x-cloak class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div @click.away="closeModal('modalTag')" class="bg-white rounded-lg max-w-md w-full p-6 shadow-xl space-y-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-gray-900" x-text="formTag.id ? 'Ubah Tag' : 'Tambah Tag Baru'"></h3>
+        <button @click="closeModal('modalTag')" class="text-gray-400 hover:text-gray-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="space-y-3 text-sm">
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Nama Tag *</label>
+          <input type="text" x-model="formTag.nama" class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: Hot Lead">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Keterangan</label>
+          <textarea x-model="formTag.keterangan" rows="2" class="w-full p-2 border rounded-lg" placeholder="Penjelasan tag..."></textarea>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-3 border-t">
+        <button @click="closeModal('modalTag')" class="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Batal</button>
+        <button @click="saveTag()" :disabled="saving" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center space-x-1.5 disabled:opacity-50">
+          <i data-lucide="loader" class="w-4 h-4 animate-spin" x-show="saving"></i>
+          <span>Simpan Tag</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ATURAN AKSI TAG -->
+  <div x-show="modals.modalAturanTag" x-cloak class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div @click.away="closeModal('modalAturanTag')" class="bg-white rounded-lg max-w-md w-full p-6 shadow-xl space-y-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-gray-900">Buat Aturan Aksi Tag</h3>
+        <button @click="closeModal('modalAturanTag')" class="text-gray-400 hover:text-gray-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="space-y-3 text-sm">
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Jika Tag Ditambahkan (Pemicu) *</label>
+          <select x-model="formTagAturan.id_tag_pemicu" class="w-full p-2 border rounded-lg">
+            <option value="">-- Pilih Tag Pemicu --</option>
+            <template x-for="t in tagList" :key="t.id">
+              <option :value="t.id" x-text="t.nama"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Aksi Otomatis *</label>
+          <select x-model="formTagAturan.aksi" class="w-full p-2 border rounded-lg">
+            <option value="hapus">Hapus Tag Target</option>
+            <option value="tambah">Tambah Tag Target</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Tag Target *</label>
+          <select x-model="formTagAturan.id_tag_target" class="w-full p-2 border rounded-lg">
+            <option value="">-- Pilih Tag Target --</option>
+            <template x-for="t in tagList" :key="t.id">
+              <option :value="t.id" x-text="t.nama"></option>
+            </template>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-3 border-t">
+        <button @click="closeModal('modalAturanTag')" class="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Batal</button>
+        <button @click="saveTagAturan()" :disabled="saving" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center space-x-1.5 disabled:opacity-50">
+          <i data-lucide="loader" class="w-4 h-4 animate-spin" x-show="saving"></i>
+          <span>Simpan Aturan</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: SEGMEN BARU -->
+  <div x-show="modals.modalSegmen" x-cloak class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div @click.away="closeModal('modalSegmen')" class="bg-white rounded-lg max-w-lg w-full p-6 shadow-xl space-y-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-gray-900">Buat Segmen Kontak Baru</h3>
+        <button @click="closeModal('modalSegmen')" class="text-gray-400 hover:text-gray-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="space-y-3 text-sm">
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Nama Segmen *</label>
+          <input type="text" x-model="formSegmen.nama" class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: Prospek Jakarta Tertarik">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Kombinasi Kondisi</label>
+          <select x-model="formSegmen.operator" class="w-full p-2 border rounded-lg">
+            <option value="AND">Harus memenuhi SEMUA kondisi (AND)</option>
+            <option value="OR">Cukup memenuhi SALAH SATU kondisi (OR)</option>
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Filter Tahap</label>
+            <select x-model="formSegmen.tahap" class="w-full p-2 border rounded-lg">
+              <option value="">Semua Tahap</option>
+              <option value="baru">Baru</option>
+              <option value="dihubungi">Dihubungi</option>
+              <option value="tertarik">Tertarik</option>
+              <option value="closing">Closing</option>
+              <option value="pelanggan">Pelanggan</option>
+              <option value="tidak_tertarik">Tidak Tertarik</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Filter Tag</label>
+            <select x-model="formSegmen.tag" class="w-full p-2 border rounded-lg">
+              <option value="">Semua Tag</option>
+              <template x-for="t in tagList" :key="t.id">
+                <option :value="t.id" x-text="t.nama"></option>
+              </template>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Kota Berisi</label>
+            <input type="text" x-model="formSegmen.kota" class="w-full p-2 border rounded-lg" placeholder="Contoh: Jakarta">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Sumber Berisi</label>
+            <input type="text" x-model="formSegmen.sumber" class="w-full p-2 border rounded-lg" placeholder="Contoh: Instagram">
+          </div>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-3 border-t">
+        <button @click="closeModal('modalSegmen')" class="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Batal</button>
+        <button @click="saveSegmen()" :disabled="saving" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center space-x-1.5 disabled:opacity-50">
+          <i data-lucide="loader" class="w-4 h-4 animate-spin" x-show="saving"></i>
+          <span>Simpan Segmen</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: TEMPLATE PESAN -->
+  <div x-show="modals.modalTemplate" x-cloak class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div @click.away="closeModal('modalTemplate')" class="bg-white rounded-lg max-w-lg w-full p-6 shadow-xl space-y-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-gray-900" x-text="formTemplate.id ? 'Ubah Template' : 'Tambah Template Baru'"></h3>
+        <button @click="closeModal('modalTemplate')" class="text-gray-400 hover:text-gray-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="space-y-3 text-sm">
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Nama Template *</label>
+          <input type="text" x-model="formTemplate.nama" class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: Pengingat Promo Ramadhan">
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-semibold text-gray-600">Isi Pesan WhatsApp *</label>
+            <span class="text-[11px] text-gray-400">Variabel: {nama}, {kota}, {sumber}</span>
+          </div>
+          <textarea x-model="formTemplate.isi_pesan" rows="6" class="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Halo {nama}, kami punya promo khusus untuk Anda di {kota}..."></textarea>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-3 border-t">
+        <button @click="closeModal('modalTemplate')" class="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Batal</button>
+        <button @click="saveTemplate()" :disabled="saving" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center space-x-1.5 disabled:opacity-50">
+          <i data-lucide="loader" class="w-4 h-4 animate-spin" x-show="saving"></i>
+          <span>Simpan Template</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: PENGIRIM WHATSAPP -->
+  <div x-show="modals.modalPengirim" x-cloak class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div @click.away="closeModal('modalPengirim')" class="bg-white rounded-lg max-w-lg w-full p-6 shadow-xl space-y-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-gray-900" x-text="formPengirim.id ? 'Ubah Pengirim' : 'Tambah Nomor Pengirim'"></h3>
+        <button @click="closeModal('modalPengirim')" class="text-gray-400 hover:text-gray-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="space-y-3 text-sm">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Label Pengirim *</label>
+            <input type="text" x-model="formPengirim.label" class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Contoh: CS Sales 1">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Nomor WhatsApp *</label>
+            <input type="text" x-model="formPengirim.no_hp" class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="08123... / 628123...">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Device ID / Session ID</label>
+            <input type="text" x-model="formPengirim.device_id" class="w-full p-2 border rounded-lg" placeholder="device-01">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Kuota Harian (Pesan/Hari)</label>
+            <input type="number" x-model.number="formPengirim.kuota_harian" class="w-full p-2 border rounded-lg" min="1" max="1000">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Catatan</label>
+          <textarea x-model="formPengirim.catatan" rows="2" class="w-full p-2 border rounded-lg" placeholder="Catatan nomor perangkat..."></textarea>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-3 border-t">
+        <button @click="closeModal('modalPengirim')" class="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Batal</button>
+        <button @click="savePengirim()" :disabled="saving" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold inline-flex items-center space-x-1.5 disabled:opacity-50">
+          <i data-lucide="loader" class="w-4 h-4 animate-spin" x-show="saving"></i>
+          <span>Simpan Pengirim</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- MODAL: DIALOG KONFIRMASI UMUM (NO BROWSER ALERT/CONFIRM) -->
   <div x-show="modals.modalConfirm" x-cloak class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
     <div class="bg-white rounded-lg max-w-sm w-full p-5 shadow-2xl space-y-4">
@@ -1172,6 +1382,11 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
 
         // Forms state
         formKontak: { id: '', nama: '', no_hp: '', email: '', kota: '', sumber: '', tahap: 'baru', catatan: '', opt_out: false, tagIds: [] },
+        formTag: { id: '', nama: '', keterangan: '' },
+        formTagAturan: { id: '', id_tag_pemicu: '', aksi: 'hapus', id_tag_target: '' },
+        formSegmen: { id: '', nama: '', operator: 'AND', tahap: '', tag: '', kota: '', sumber: '' },
+        formTemplate: { id: '', nama: '', isi_pesan: '', variabel: '{nama}, {kota}, {sumber}' },
+        formPengirim: { id: '', label: '', no_hp: '', device_id: '', kuota_harian: 50, catatan: '' },
         csvText: '',
         importResults: null,
         activeJobDetail: { nama: '', recipients: [] },
@@ -1374,6 +1589,37 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           return match ? match.nama : id;
         },
 
+        openModalTag: function(item) {
+          if (item) {
+            this.formTag = { id: item.id, nama: item.nama, keterangan: item.keterangan || '' };
+          } else {
+            this.formTag = { id: '', nama: '', keterangan: '' };
+          }
+          this.openModal('modalTag');
+        },
+
+        saveTag: function() {
+          var self = this;
+          if (!self.formTag.nama.trim()) {
+            self.showToast('Nama tag wajib diisi.', 'error');
+            return;
+          }
+          self.saving = true;
+          google.script.run.withSuccessHandler(function(res) {
+            self.saving = false;
+            if (res && res.ok) {
+              self.showToast('Tag berhasil disimpan.');
+              self.closeModal('modalTag');
+              self.loadTags();
+            } else {
+              self.showToast(res ? res.message : 'Gagal simpan tag', 'error');
+            }
+          }).withFailureHandler(function(err) {
+            self.saving = false;
+            self.showToast('Error: ' + err.message, 'error');
+          }).saveTag(self.formTag);
+        },
+
         confirmDeleteTag: function(tag) {
           var self = this;
           self.confirmDialog = {
@@ -1394,6 +1640,150 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
           self.openModal('modalConfirm');
         },
 
+        openModalAturanTag: function() {
+          this.formTagAturan = { id: '', id_tag_pemicu: '', aksi: 'hapus', id_tag_target: '' };
+          this.openModal('modalAturanTag');
+        },
+
+        saveTagAturan: function() {
+          var self = this;
+          if (!self.formTagAturan.id_tag_pemicu || !self.formTagAturan.id_tag_target) {
+            self.showToast('Tag pemicu dan target wajib dipilih.', 'error');
+            return;
+          }
+          if (self.formTagAturan.id_tag_pemicu === self.formTagAturan.id_tag_target) {
+            self.showToast('Tag pemicu dan target tidak boleh sama.', 'error');
+            return;
+          }
+          self.saving = true;
+          google.script.run.withSuccessHandler(function(res) {
+            self.saving = false;
+            if (res && res.ok) {
+              self.showToast('Aturan tag berhasil disimpan.');
+              self.closeModal('modalAturanTag');
+              self.loadTagAturan();
+            } else {
+              self.showToast(res ? res.message : 'Gagal simpan aturan tag', 'error');
+            }
+          }).withFailureHandler(function(err) {
+            self.saving = false;
+            self.showToast('Error: ' + err.message, 'error');
+          }).saveTagAturan(self.formTagAturan);
+        },
+
+        deleteTagAturan: function(id) {
+          var self = this;
+          self.confirmDialog = {
+            title: 'Hapus Aturan Tag?',
+            message: 'Aturan aksi otomatis ini akan dihapus permanen.',
+            isDanger: true,
+            callback: function() {
+              google.script.run.withSuccessHandler(function(res) {
+                if (res && res.ok) {
+                  self.showToast('Aturan berhasil dihapus.');
+                  self.loadTagAturan();
+                } else {
+                  self.showToast(res ? res.message : 'Gagal hapus aturan', 'error');
+                }
+              }).deleteTagAturan(id);
+            }
+          };
+          self.openModal('modalConfirm');
+        },
+
+        // SEGMEN
+        loadSegmen: function() {
+          var self = this;
+          google.script.run.withSuccessHandler(function(res) {
+            if (res && res.ok) self.segmenList = res.data;
+            self.$nextTick(function() { lucide.createIcons(); });
+          }).getSegmenList();
+        },
+
+        formatKondisi: function(kondisiStr) {
+          if (!kondisiStr) return 'Semua kontak (tanpa filter)';
+          try {
+            var k = typeof kondisiStr === 'string' ? JSON.parse(kondisiStr) : kondisiStr;
+            var parts = [];
+            if (k.tahap) parts.push('Tahap: ' + k.tahap);
+            if (k.tag) parts.push('Tag: ' + this.getTagName(k.tag));
+            if (k.kota) parts.push('Kota: ' + k.kota);
+            if (k.sumber) parts.push('Sumber: ' + k.sumber);
+            if (parts.length === 0) return 'Semua kontak (tanpa filter)';
+            var op = k.operator || 'AND';
+            return 'Kondisi (' + op + '): ' + parts.join(' ' + op + ' ');
+          } catch (e) {
+            return String(kondisiStr);
+          }
+        },
+
+        openModalSegmen: function() {
+          this.formSegmen = { id: '', nama: '', operator: 'AND', tahap: '', tag: '', kota: '', sumber: '' };
+          this.openModal('modalSegmen');
+        },
+
+        saveSegmen: function() {
+          var self = this;
+          if (!self.formSegmen.nama.trim()) {
+            self.showToast('Nama segmen wajib diisi.', 'error');
+            return;
+          }
+          var kondisi = {
+            operator: self.formSegmen.operator || 'AND',
+            tahap: self.formSegmen.tahap || '',
+            tag: self.formSegmen.tag || '',
+            kota: self.formSegmen.kota || '',
+            sumber: self.formSegmen.sumber || ''
+          };
+          var payload = {
+            id: self.formSegmen.id,
+            nama: self.formSegmen.nama,
+            kondisi_json: JSON.stringify(kondisi)
+          };
+          self.saving = true;
+          google.script.run.withSuccessHandler(function(res) {
+            self.saving = false;
+            if (res && res.ok) {
+              self.showToast('Segmen berhasil disimpan.');
+              self.closeModal('modalSegmen');
+              self.loadSegmen();
+            } else {
+              self.showToast(res ? res.message : 'Gagal simpan segmen', 'error');
+            }
+          }).withFailureHandler(function(err) {
+            self.saving = false;
+            self.showToast('Error: ' + err.message, 'error');
+          }).saveSegmen(payload);
+        },
+
+        deleteSegmen: function(id) {
+          var self = this;
+          self.confirmDialog = {
+            title: 'Hapus Segmen?',
+            message: 'Segmen ini akan dihapus dari daftar.',
+            isDanger: true,
+            callback: function() {
+              google.script.run.withSuccessHandler(function(res) {
+                if (res && res.ok) {
+                  self.showToast('Segmen berhasil dihapus.');
+                  self.loadSegmen();
+                } else {
+                  self.showToast(res ? res.message : 'Gagal hapus segmen', 'error');
+                }
+              }).deleteSegmen(id);
+            }
+          };
+          self.openModal('modalConfirm');
+        },
+
+        useSegmenInBroadcast: function(segId) {
+          this.currentTab = 'broadcast';
+          this.startWizard();
+          this.wizardData.targetMode = 'segmen';
+          this.wizardData.segmenId = segId;
+          this.wizardStep = 1;
+        },
+
         // PENGIRIM (F-11, F-12)
         loadPengirim: function() {
           var self = this;
@@ -1401,6 +1791,51 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
             if (res && res.ok) self.pengirimList = res.data;
             self.$nextTick(function() { lucide.createIcons(); });
           }).getPengirimList();
+        },
+
+        openModalPengirim: function(item) {
+          if (item) {
+            this.formPengirim = {
+              id: item.id,
+              label: item.label,
+              no_hp: item.no_hp,
+              device_id: item.device_id || '',
+              kuota_harian: item.kuota_harian || 50,
+              catatan: item.catatan || ''
+            };
+          } else {
+            this.formPengirim = {
+              id: '',
+              label: '',
+              no_hp: '',
+              device_id: '',
+              kuota_harian: this.settings.kuota_default || 50,
+              catatan: ''
+            };
+          }
+          this.openModal('modalPengirim');
+        },
+
+        savePengirim: function() {
+          var self = this;
+          if (!self.formPengirim.label || !self.formPengirim.no_hp) {
+            self.showToast('Label dan nomor HP pengirim wajib diisi.', 'error');
+            return;
+          }
+          self.saving = true;
+          google.script.run.withSuccessHandler(function(res) {
+            self.saving = false;
+            if (res && res.ok) {
+              self.showToast('Pengirim berhasil disimpan.');
+              self.closeModal('modalPengirim');
+              self.loadPengirim();
+            } else {
+              self.showToast(res ? res.message : 'Gagal simpan pengirim', 'error');
+            }
+          }).withFailureHandler(function(err) {
+            self.saving = false;
+            self.showToast('Error: ' + err.message, 'error');
+          }).savePengirim(self.formPengirim);
         },
 
         togglePengirimStatus: function(p) {
@@ -1444,6 +1879,59 @@ Siti Rahma,+62 813-9999-8888,siti@mail.com,Bandung,IG Ads,tertarik"></textarea>
             if (res && res.ok) self.templateList = res.data;
             self.$nextTick(function() { lucide.createIcons(); });
           }).getTemplateList();
+        },
+
+        openModalTemplate: function(item) {
+          if (item) {
+            this.formTemplate = {
+              id: item.id,
+              nama: item.nama,
+              isi_pesan: item.isi_pesan,
+              variabel: item.variabel || '{nama}, {kota}, {sumber}'
+            };
+          } else {
+            this.formTemplate = {
+              id: '',
+              nama: '',
+              isi_pesan: '',
+              variabel: '{nama}, {kota}, {sumber}'
+            };
+          }
+          this.openModal('modalTemplate');
+        },
+
+        saveTemplate: function() {
+          var self = this;
+          if (!self.formTemplate.nama || !self.formTemplate.isi_pesan) {
+            self.showToast('Nama dan isi pesan template wajib diisi.', 'error');
+            return;
+          }
+          self.saving = true;
+          google.script.run.withSuccessHandler(function(res) {
+            self.saving = false;
+            if (res && res.ok) {
+              self.showToast('Template berhasil disimpan.');
+              self.closeModal('modalTemplate');
+              self.loadTemplates();
+            } else {
+              self.showToast(res ? res.message : 'Gagal simpan template', 'error');
+            }
+          }).withFailureHandler(function(err) {
+            self.saving = false;
+            self.showToast('Error: ' + err.message, 'error');
+          }).saveTemplate(self.formTemplate);
+        },
+
+        toggleTemplateStatus: function(t) {
+          var self = this;
+          google.script.run.withSuccessHandler(function(res) {
+            if (res && res.ok) {
+              self.showToast('Status template diperbarui.');
+              self.loadTemplates();
+            } else {
+              self.showToast(res ? res.message : 'Gagal ubah status', 'error');
+            }
+          }).toggleTemplateStatus(t.id);
         },
 
         // BROADCAST WIZARD (F-13)
