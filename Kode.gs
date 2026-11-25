@@ -38,6 +38,8 @@ function doPost(e) {
       result = reportSendResult(content);
     } else if (action === 'lapor_pengirim') {
       result = reportSenderStatus(content.id_pengirim, content.status, content.alasan);
+    } else if (action === 'ambil_konfigurasi') {
+      result = getKonfigurasiBalesotomatis();
     } else {
       result = { ok: false, message: 'Aksi webhook tidak dikenali: ' + action };
     }
@@ -68,7 +70,7 @@ function setupDatabase() {
     { name: 'Tag_Aturan', headers: ['id', 'id_tag_pemicu', 'aksi', 'id_tag_target'] },
     { name: 'Segmen', headers: ['id', 'nama', 'kondisi_json', 'dibuat_pada'] },
     { name: 'Template', headers: ['id', 'nama', 'isi_pesan', 'variabel', 'aktif', 'dibuat_pada'] },
-    { name: 'Pengirim', headers: ['id', 'label', 'no_hp', 'device_id', 'status', 'kuota_harian', 'terpakai_hari_ini', 'tanggal_reset', 'terakhir_dipakai_pada', 'catatan'] },
+    { name: 'Pengirim', headers: ['id', 'label', 'no_hp', 'device_id', 'status', 'kuota_harian', 'terpakai_hari_ini', 'tanggal_reset', 'terakhir_dipakai_pada', 'catatan', 'bales_number_id'] },
     { name: 'Broadcast_Job', headers: ['id', 'kampanye_id', 'id_job_induk', 'nama', 'id_template', 'id_pengirim', 'jeda_min', 'jeda_max', 'status', 'jumlah_target', 'dibuat_pada'] },
     { name: 'Broadcast_Job_Aksi', headers: ['id_job', 'id_tag', 'aksi'] },
     { name: 'Broadcast_Kirim', headers: ['id', 'id_job', 'id_kontak', 'no_hp', 'isi_pesan', 'status', 'alasan', 'id_klaim', 'waktu_klaim', 'percobaan', 'waktu_update'] },
@@ -703,7 +705,8 @@ function getPengirimList() {
         kuota_harian: Number(data[i][5]) || 0,
         terpakai_hari_ini: Number(data[i][6]) || 0,
         terakhir_dipakai_pada: data[i][8] ? String(data[i][8]) : '',
-        catatan: String(data[i][9])
+        catatan: String(data[i][9]),
+        bales_number_id: data[i][10] !== undefined ? String(data[i][10]) : ''
       });
     }
     return { ok: true, data: serializeForClient(list) };
@@ -751,10 +754,15 @@ function savePengirim(pengirimData) {
     var todayStr = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyy-MM-dd');
     var id = isUpdate ? pengirimData.id : ('p_' + Utilities.getUuid().substring(0, 8));
 
+    if (sheet.getLastColumn() < 11 || String(sheet.getRange(1, 11).getValue()).trim() !== 'bales_number_id') {
+      sheet.getRange(1, 11).setValue('bales_number_id');
+    }
+
     if (isUpdate && targetRow > 0) {
       sheet.getRange(targetRow, 2, 1, 3).setValues([[pengirimData.label, normalizedPhone, pengirimData.device_id || '']]);
       sheet.getRange(targetRow, 6).setValue(Number(pengirimData.kuota_harian) || 50);
       sheet.getRange(targetRow, 10).setValue(pengirimData.catatan || '');
+      sheet.getRange(targetRow, 11).setValue(pengirimData.bales_number_id || '');
     } else {
       sheet.appendRow([
         id,
@@ -766,7 +774,8 @@ function savePengirim(pengirimData) {
         0,
         todayStr,
         '',
-        pengirimData.catatan || ''
+        pengirimData.catatan || '',
+        pengirimData.bales_number_id || ''
       ]);
     }
     writeLog('SIMPAN_PENGIRIM', id, 'Menyimpan nomor pengirim ' + pengirimData.label);
@@ -1437,8 +1446,8 @@ function claimQueueItems(idJob, limit) {
     resetKuotaHarianInternal(ss);
     checkAndResetStalledClaims(ss);
 
-    var jamMulai = String(getSettingValue('jam_kirim_mulai', '08:00')).trim();
-    var jamSelesai = String(getSettingValue('jam_kirim_selesai', '21:00')).trim();
+    var jamMulai = formatTimeValue(getSettingValue('jam_kirim_mulai', '08:00'));
+    var jamSelesai = formatTimeValue(getSettingValue('jam_kirim_selesai', '21:00'));
     if (jamMulai.length === 4) jamMulai = '0' + jamMulai;
     if (jamSelesai.length === 4) jamSelesai = '0' + jamSelesai;
     var nowTime = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'HH:mm');
@@ -1943,20 +1952,51 @@ function removeKontakTags(contactId) {
   }
 }
 
+function formatTimeValue(val) {
+  if (!val && val !== 0) return '';
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, 'Asia/Jakarta', 'HH:mm');
+  }
+  var s = String(val).trim();
+  if (s.indexOf('T') > -1 || s.indexOf('1899-') === 0 || s.indexOf('1970-') === 0) {
+    var d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      return Utilities.formatDate(d, 'Asia/Jakarta', 'HH:mm');
+    }
+  }
+  var match = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (match) {
+    var h = match[1].length === 1 ? '0' + match[1] : match[1];
+    return h + ':' + match[2];
+  }
+  return s;
+}
+
 function getPengaturan() {
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Pengaturan');
   var data = sheet.getDataRange().getValues();
   var out = {};
   for (var i = 1; i < data.length; i++) {
-    out[String(data[i][0])] = data[i][1];
+    var key = String(data[i][0]).trim();
+    var val = data[i][1];
+    if (key === 'jam_kirim_mulai' || key === 'jam_kirim_selesai') {
+      out[key] = formatTimeValue(val);
+    } else {
+      out[key] = val;
+    }
+  }
+  var apiKey = PropertiesService.getScriptProperties().getProperty('BALESOTOMATIS_API_KEY') || '';
+  out['bales_api_key'] = apiKey;
+  if (out['bales_send_url'] === undefined) {
+    out['bales_send_url'] = '';
   }
   return { ok: true, data: serializeForClient(out) };
 }
 
 function getSettingValue(key, fallback) {
   var p = getPengaturan();
-  if (p && p.ok && p.data && p.data[key] !== undefined) {
+  if (p && p.ok && p.data && p.data[key] !== undefined && p.data[key] !== '') {
     return p.data[key];
   }
   return fallback;
@@ -1968,18 +2008,87 @@ function savePengaturan(settingsObj) {
   var data = sheet.getDataRange().getValues();
   var existing = {};
   for (var i = 1; i < data.length; i++) {
-    existing[String(data[i][0])] = i + 1;
+    existing[String(data[i][0]).trim()] = i + 1;
   }
 
   for (var k in settingsObj) {
-    if (existing[k]) {
-      sheet.getRange(existing[k], 2).setValue(settingsObj[k]);
+    if (k === 'bales_api_key') continue;
+    var valToSave = settingsObj[k];
+    if (k === 'jam_kirim_mulai' || k === 'jam_kirim_selesai') {
+      valToSave = formatTimeValue(valToSave);
+      if (existing[k]) {
+        var cell = sheet.getRange(existing[k], 2);
+        cell.setNumberFormat('@');
+        cell.setValue(valToSave);
+      } else {
+        var newRow = sheet.getLastRow() + 1;
+        sheet.getRange(newRow, 1).setNumberFormat('@').setValue(k);
+        sheet.getRange(newRow, 2).setNumberFormat('@').setValue(valToSave);
+        existing[k] = newRow;
+      }
     } else {
-      sheet.appendRow([k, settingsObj[k]]);
+      if (existing[k]) {
+        sheet.getRange(existing[k], 2).setValue(valToSave);
+      } else {
+        sheet.appendRow([k, valToSave]);
+        existing[k] = sheet.getLastRow();
+      }
     }
   }
   writeLog('PENGATURAN', 'CONFIG', 'Memperbarui pengaturan sistem');
   return { ok: true };
+}
+
+function saveIntegrasiBalesotomatis(payload) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    var apiKey = payload && payload.bales_api_key !== undefined ? String(payload.bales_api_key).trim() : '';
+    var sendUrl = payload && payload.bales_send_url !== undefined ? String(payload.bales_send_url).trim() : '';
+
+    PropertiesService.getScriptProperties().setProperty('BALESOTOMATIS_API_KEY', apiKey);
+
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName('Pengaturan');
+    var data = sheet.getDataRange().getValues();
+    var existingRow = -1;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === 'bales_send_url') {
+        existingRow = i + 1;
+        break;
+      }
+    }
+
+    if (existingRow > 0) {
+      sheet.getRange(existingRow, 2).setNumberFormat('@').setValue(sendUrl);
+    } else {
+      var newRowIdx = sheet.getLastRow() + 1;
+      sheet.getRange(newRowIdx, 1).setNumberFormat('@').setValue('bales_send_url');
+      sheet.getRange(newRowIdx, 2).setNumberFormat('@').setValue(sendUrl);
+    }
+
+    writeLog('SIMPAN_INTEGRASI', 'CONFIG', 'Memperbarui konfigurasi integrasi Balesotomatis');
+    return { ok: true, message: 'Integrasi Balesotomatis berhasil disimpan.' };
+  } catch (err) {
+    return { ok: false, message: 'Gagal menyimpan integrasi: ' + err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getKonfigurasiBalesotomatis() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('BALESOTOMATIS_API_KEY') || '';
+  var sendUrl = String(getSettingValue('bales_send_url', '')).trim();
+  if (!apiKey || !sendUrl) {
+    return { ok: false, message: 'konfigurasi Balesotomatis belum lengkap' };
+  }
+  return {
+    ok: true,
+    data: {
+      bales_send_url: sendUrl,
+      bales_api_key: apiKey
+    }
+  };
 }
 
 function writeLog(aksi, idData, detail) {
