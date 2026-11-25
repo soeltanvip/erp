@@ -23,7 +23,10 @@ function doPost(e) {
     var action = content.action || (e && e.parameter ? e.parameter.action : '');
     var token = content.token || (e && e.parameter ? e.parameter.token : '');
 
-    var validToken = getSettingValue('webhook_token', 'SECRET_DEFAULT_KEY');
+    var validToken = getSettingValue('webhook_token', '');
+    if (!validToken) {
+      return jsonResponse({ ok: false, message: 'Token belum diatur' });
+    }
     if (token !== validToken) {
       return jsonResponse({ ok: false, message: 'Unauthorized webhook token' });
     }
@@ -1430,7 +1433,9 @@ function claimQueueItems(idJob, limit) {
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(15000);
-    checkAndResetStalledClaims();
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    resetKuotaHarianInternal(ss);
+    checkAndResetStalledClaims(ss);
 
     var jamMulai = String(getSettingValue('jam_kirim_mulai', '08:00')).trim();
     var jamSelesai = String(getSettingValue('jam_kirim_selesai', '21:00')).trim();
@@ -1441,14 +1446,17 @@ function claimQueueItems(idJob, limit) {
       return { ok: true, data: { claim_id: '', claimed_count: 0, items: [], alasan: 'di_luar_jam_kirim' } };
     }
 
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     var jobSheet = ss.getSheetByName('Broadcast_Job');
     var jData = jobSheet.getDataRange().getValues();
     var jobRow = null;
+    var jobToSender = {};
+
     for (var j = 1; j < jData.length; j++) {
-      if (String(jData[j][0]) === String(idJob)) {
+      var currentJobId = String(jData[j][0]);
+      var currentSenderId = String(jData[j][5]);
+      jobToSender[currentJobId] = currentSenderId;
+      if (currentJobId === String(idJob)) {
         jobRow = jData[j];
-        break;
       }
     }
 
@@ -1476,14 +1484,25 @@ function claimQueueItems(idJob, limit) {
 
     var kuotaHarian = Number(senderRow[5]) || 0;
     var terpakaiHariIni = Number(senderRow[6]) || 0;
-    var sisaKuota = kuotaHarian - terpakaiHariIni;
-    if (kuotaHarian > 0 && sisaKuota <= 0) {
-      return { ok: true, data: { claim_id: '', claimed_count: 0, items: [], alasan: 'kuota_habis' } };
-    }
 
     var kirimSheet = ss.getSheetByName('Broadcast_Kirim');
     var kRange = kirimSheet.getDataRange();
     var kData = kRange.getValues();
+
+    var jumlahDiproses = 0;
+    for (var k = 1; k < kData.length; k++) {
+      var rowJobId = String(kData[k][1]);
+      var rowStatus = String(kData[k][5]);
+      if (rowStatus === 'diproses' && jobToSender[rowJobId] === senderId) {
+        jumlahDiproses++;
+      }
+    }
+
+    var sisaKuota = kuotaHarian - terpakaiHariIni - jumlahDiproses;
+    if (kuotaHarian > 0 && sisaKuota <= 0) {
+      return { ok: true, data: { claim_id: '', claimed_count: 0, items: [], alasan: 'kuota_habis' } };
+    }
+
     var claimed = [];
     var claimId = 'claim_' + Utilities.getUuid().substring(0, 8);
     var nowIso = new Date().toISOString();
@@ -1603,58 +1622,71 @@ function reportSendResult(payload) {
  * Sender banned or limit -> halt job & mark unsent as gagal_pengirim_banned
  */
 function reportSenderStatus(idPengirim, status, alasan) {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  var pSheet = ss.getSheetByName('Pengirim');
-  var pData = pSheet.getDataRange().getValues();
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var pSheet = ss.getSheetByName('Pengirim');
+    var pData = pSheet.getDataRange().getValues();
 
-  for (var i = 1; i < pData.length; i++) {
-    if (String(pData[i][0]) === String(idPengirim)) {
-      pSheet.getRange(i + 1, 5).setValue(status);
-      pSheet.getRange(i + 1, 10).setValue(alasan || '');
-      break;
-    }
-  }
-
-  if (status === 'banned' || status === 'limit') {
-    // Hentikan semua job aktif milik pengirim ini
-    var jobSheet = ss.getSheetByName('Broadcast_Job');
-    var jData = jobSheet.getDataRange().getValues();
-    var affectedJobIds = [];
-
-    for (var j = 1; j < jData.length; j++) {
-      if (String(jData[j][5]) === String(idPengirim) && String(jData[j][8]) === 'berjalan') {
-        jobSheet.getRange(j + 1, 9).setValue('dihentikan');
-        affectedJobIds.push(String(jData[j][0]));
+    for (var i = 1; i < pData.length; i++) {
+      if (String(pData[i][0]) === String(idPengirim)) {
+        pSheet.getRange(i + 1, 5).setValue(status);
+        pSheet.getRange(i + 1, 10).setValue(alasan || '');
+        break;
       }
     }
 
-    // Tandai sisa antrean menjadi gagal_pengirim_banned
-    var kirimSheet = ss.getSheetByName('Broadcast_Kirim');
-    var kData = kirimSheet.getDataRange().getValues();
-    for (var k = 1; k < kData.length; k++) {
-      var rowJob = String(kData[k][1]);
-      var rowStatus = String(kData[k][5]);
-      if (affectedJobIds.indexOf(rowJob) > -1 && (rowStatus === 'antre' || rowStatus === 'diproses')) {
-        kirimSheet.getRange(k + 1, 6).setValue('gagal_pengirim_banned');
-        kirimSheet.getRange(k + 1, 7).setValue('Pengirim ' + status + ': ' + alasan);
+    if (status === 'banned' || status === 'limit') {
+      var jobSheet = ss.getSheetByName('Broadcast_Job');
+      var jData = jobSheet.getDataRange().getValues();
+      var affectedJobIds = [];
+
+      for (var j = 1; j < jData.length; j++) {
+        if (String(jData[j][5]) === String(idPengirim) && String(jData[j][8]) === 'berjalan') {
+          jobSheet.getRange(j + 1, 9).setValue('dihentikan');
+          affectedJobIds.push(String(jData[j][0]));
+        }
+      }
+
+      var kirimSheet = ss.getSheetByName('Broadcast_Kirim');
+      var kData = kirimSheet.getDataRange().getValues();
+      for (var k = 1; k < kData.length; k++) {
+        var rowJob = String(kData[k][1]);
+        var rowStatus = String(kData[k][5]);
+        if (affectedJobIds.indexOf(rowJob) > -1 && (rowStatus === 'antre' || rowStatus === 'diproses')) {
+          kirimSheet.getRange(k + 1, 6).setValue('gagal_pengirim_banned');
+          kirimSheet.getRange(k + 1, 7).setValue('Pengirim ' + status + ': ' + alasan);
+        }
       }
     }
-  }
 
-  writeLog('LAPOR_PENGIRIM', idPengirim, 'Pengirim dilaporkan ' + status + ': ' + alasan);
-  return { ok: true };
+    writeLog('LAPOR_PENGIRIM', idPengirim, 'Pengirim dilaporkan ' + status + ': ' + alasan);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
  * SELF-HEALING: Reset Stalled Claims > 10 Minutes (BR-10, AC-10)
  */
-function checkAndResetStalledClaims() {
+function checkAndResetStalledClaims(ss) {
   try {
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    ss = ss || SpreadsheetApp.openById(SPREADSHEET_ID);
     var sheet = ss.getSheetByName('Broadcast_Kirim');
-    var data = sheet.getDataRange().getValues();
+    if (!sheet) return;
+    var range = sheet.getDataRange();
+    var data = range.getValues();
+    if (data.length <= 1) return;
+
     var tenMinutesAgo = new Date(new Date().getTime() - (10 * 60 * 1000));
-    var resetCount = 0;
+    var antreCount = 0;
+    var gagalCount = 0;
+    var changed = false;
+    var nowIso = new Date().toISOString();
 
     for (var i = 1; i < data.length; i++) {
       var status = String(data[i][5]);
@@ -1663,16 +1695,29 @@ function checkAndResetStalledClaims() {
       if (status === 'diproses' && waktuKlaimStr) {
         var claimDate = new Date(waktuKlaimStr);
         if (!isNaN(claimDate.getTime()) && claimDate < tenMinutesAgo) {
-          sheet.getRange(i + 1, 6).setValue('antre');
-          sheet.getRange(i + 1, 8).setValue(''); // hapus id_klaim
-          sheet.getRange(i + 1, 9).setValue(''); // hapus waktu_klaim
-          resetCount++;
+          var percobaan = Number(data[i][9]) || 0;
+          if (percobaan >= 1) {
+            data[i][5] = 'gagal_permanen';
+            data[i][6] = 'status kirim tidak diketahui (klaim kedaluwarsa)';
+            data[i][7] = '';
+            data[i][8] = '';
+            data[i][10] = nowIso;
+            gagalCount++;
+          } else {
+            data[i][5] = 'antre';
+            data[i][7] = '';
+            data[i][8] = '';
+            data[i][10] = nowIso;
+            antreCount++;
+          }
+          changed = true;
         }
       }
     }
 
-    if (resetCount > 0) {
-      writeLog('RESET_STALLED_CLAIM', 'SYSTEM', 'Mengembalikan ' + resetCount + ' klaim stalled ke antre.');
+    if (changed) {
+      range.setValues(data);
+      writeLog('RESET_STALLED_CLAIM', 'SYSTEM', 'Reset klaim stalled: ' + antreCount + ' ke antre, ' + gagalCount + ' ke gagal permanen.');
     }
   } catch (e) {
     // ignore
@@ -1687,40 +1732,45 @@ function checkAndResetDailyQuotas() {
   try {
     lock.waitLock(10000);
     var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    var sheet = ss.getSheetByName('Pengirim');
-    var range = sheet.getDataRange();
-    var data = range.getValues();
-    if (data.length <= 1) return;
-
-    var todayStr = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyy-MM-dd');
-    var changed = false;
-
-    for (var i = 1; i < data.length; i++) {
-      var cellVal = data[i][7];
-      var resetDateStr = '';
-      if (cellVal instanceof Date) {
-        resetDateStr = Utilities.formatDate(cellVal, 'Asia/Jakarta', 'yyyy-MM-dd');
-      } else if (cellVal) {
-        resetDateStr = String(cellVal).trim().substring(0, 10);
-      }
-
-      if (resetDateStr !== todayStr) {
-        data[i][6] = 0;
-        data[i][7] = todayStr;
-        if (String(data[i][4]) === 'limit') {
-          data[i][4] = 'aktif';
-        }
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      range.setValues(data);
-    }
+    resetKuotaHarianInternal(ss);
   } catch (e) {
     // ignore
   } finally {
     lock.releaseLock();
+  }
+}
+
+function resetKuotaHarianInternal(ss) {
+  var sheet = ss.getSheetByName('Pengirim');
+  if (!sheet) return;
+  var range = sheet.getDataRange();
+  var data = range.getValues();
+  if (data.length <= 1) return;
+
+  var todayStr = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyy-MM-dd');
+  var changed = false;
+
+  for (var i = 1; i < data.length; i++) {
+    var cellVal = data[i][7];
+    var resetDateStr = '';
+    if (cellVal instanceof Date) {
+      resetDateStr = Utilities.formatDate(cellVal, 'Asia/Jakarta', 'yyyy-MM-dd');
+    } else if (cellVal) {
+      resetDateStr = String(cellVal).trim().substring(0, 10);
+    }
+
+    if (resetDateStr !== todayStr) {
+      data[i][6] = 0;
+      data[i][7] = todayStr;
+      if (String(data[i][4]) === 'limit') {
+        data[i][4] = 'aktif';
+      }
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    range.setValues(data);
   }
 }
 
